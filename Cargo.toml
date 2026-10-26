@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/newsbar-core"]
+members = ["crates/newsbar-core", "src-tauri"]
 
 [workspace.package]
 edition = "2024"
