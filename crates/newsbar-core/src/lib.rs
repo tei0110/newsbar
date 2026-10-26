@@ -8,6 +8,7 @@ pub mod model;
 pub mod presets;
 pub mod refresh;
 pub mod store;
+pub mod summarize;
 pub mod url_norm;
 
 /// 新着として取り込む期間（公開からの時間）

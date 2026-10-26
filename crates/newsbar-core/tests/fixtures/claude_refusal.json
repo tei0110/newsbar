@@ -1,0 +1,4 @@
+{"id":"msg_test_refusal","type":"message","role":"assistant","model":"claude-haiku-5-5",
+ "content":[{"type":"text","text":""}],
+ "stop_reason":"refusal","stop_details":{"type":"refusal","category":null,"explanation":null},
+ "usage":{"input_tokens":1200,"output_tokens":0}}
