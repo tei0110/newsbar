@@ -8,5 +8,40 @@
   </head>
   <body class="settings">
     <h1>設定</h1>
+
+    <h2>情報源</h2>
+    <div id="sources" class="card"></div>
+
+    <h2>情報源を追加</h2>
+    <div class="card">
+      <form id="add-form" class="add">
+        <input id="add-name" type="text" placeholder="名前" required />
+        <input id="add-url" type="url" placeholder="フィードの URL" required />
+        <select id="add-label">
+          <option value="AI">AI</option>
+          <option value="セキュリティ">セキュリティ</option>
+          <option value="技術全般">技術全般</option>
+        </select>
+        <button id="add-button" type="submit">追加</button>
+      </form>
+      <div id="add-error" class="form-error" hidden></div>
+    </div>
+
+    <h2>おすすめ</h2>
+    <div id="recommended" class="card"></div>
+
+    <h2>自動更新の間隔</h2>
+    <div class="card">
+      <div class="row">
+        <select id="interval">
+          <option value="30">30分</option>
+          <option value="60">1時間</option>
+          <option value="180">3時間</option>
+          <option value="360">6時間</option>
+        </select>
+      </div>
+    </div>
+
+    <script type="module" src="./src/settings.ts"></script>
   </body>
 </html>
