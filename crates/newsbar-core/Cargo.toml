@@ -7,6 +7,7 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+dom_smoothie.workspace = true
 feed-rs.workspace = true
 html2text.workspace = true
 reqwest.workspace = true

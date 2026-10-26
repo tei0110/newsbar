@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+pub mod extract;
 pub mod feed;
 pub mod ingest;
 pub mod model;
