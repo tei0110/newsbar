@@ -7,6 +7,23 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body class="popover">
-    <h1>newsbar</h1>
+    <header class="pop-header">
+      <div class="pop-title">
+        <strong id="count">新着 0件</strong>
+        <span id="updated" class="muted"></span>
+      </div>
+      <div class="pop-actions">
+        <button id="refresh" type="button">⟳ 更新</button>
+        <button id="settings" type="button">⚙ 設定</button>
+      </div>
+    </header>
+    <div id="banners"></div>
+    <nav id="tabs" class="tabs"></nav>
+    <main id="list" class="list"></main>
+    <footer class="pop-footer">
+      <button id="mark-all" type="button">すべて既読にする</button>
+      <label class="toggle"><input id="include-read" type="checkbox" /> 既読も表示</label>
+    </footer>
+    <script type="module" src="./src/popover.ts"></script>
   </body>
 </html>
