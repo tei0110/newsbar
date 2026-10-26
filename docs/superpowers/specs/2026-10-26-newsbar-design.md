@@ -114,7 +114,7 @@ AI・セキュリティ関連の情報収集を、サイトを一つずつ巡回
 | セキュリティ | Schneier on Security | https://www.schneier.com/feed/atom/ | 約6 |
 | セキュリティ | BleepingComputer | https://www.bleepingcomputer.com/feed/ | 約35 |
 | セキュリティ | piyolog | https://piyolog.hatenadiary.jp/rss | 約10 |
-| セキュリティ | Google Project Zero | https://googleprojectzero.blogspot.com/feeds/posts/default | 月に数件 |
+| セキュリティ | Google Project Zero | https://googleprojectzero.blogspot.com/feeds/posts/summary?max-results=10（全文版は11MBあり上限を超えるため概要版を使う） | 月に数件 |
 | セキュリティ | Embrace The Red | https://embracethered.com/blog/index.xml | 月に数件 |
 
 合計は約135件/週（1日あたり約19件）。

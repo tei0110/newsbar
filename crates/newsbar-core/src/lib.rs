@@ -5,6 +5,8 @@ use std::time::Duration;
 pub mod feed;
 pub mod ingest;
 pub mod model;
+pub mod presets;
+pub mod refresh;
 pub mod store;
 pub mod url_norm;
 

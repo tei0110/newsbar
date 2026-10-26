@@ -12,9 +12,9 @@ reqwest.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 url.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio.workspace = true
 wiremock.workspace = true

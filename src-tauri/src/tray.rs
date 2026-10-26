@@ -62,6 +62,14 @@ fn toggle_popover(app: &AppHandle) {
     let _ = app.emit_to(POPOVER, "popover-shown", ());
 }
 
+/// メニューバーのアイコン横に未読件数を出す（0件なら消す）。
+pub fn set_unread(app: &AppHandle, count: u32) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let title = (count > 0).then(|| count.to_string());
+        let _ = tray.set_title(title);
+    }
+}
+
 /// 設定画面を開く（なければ作る）。
 pub fn open_settings(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(SETTINGS) {
