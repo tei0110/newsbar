@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+pub mod feed;
 pub mod model;
 
 /// 新着として取り込む期間（公開からの時間）
