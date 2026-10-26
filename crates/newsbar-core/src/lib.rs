@@ -3,7 +3,10 @@
 use std::time::Duration;
 
 pub mod feed;
+pub mod ingest;
 pub mod model;
+pub mod store;
+pub mod url_norm;
 
 /// 新着として取り込む期間（公開からの時間）
 pub const NEW_ITEM_WINDOW_HOURS: i64 = 48;
