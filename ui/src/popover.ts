@@ -121,10 +121,16 @@ function details(a: Article): HTMLElement {
     void openUrl(a.url);
   });
   return el("div", { class: "details" }, [
-    el("p", { text: a.detail ?? "要約できませんでした" }),
+    el("p", { text: detailText(a), class: a.detail ? undefined : "muted" }),
     a.title ? el("p", { class: "original muted", text: a.original_title }) : null,
     open,
   ]);
+}
+
+/** 広げたときの本文。要約がまだのものと、要約できなかったものを言い分ける */
+function detailText(a: Article): string {
+  if (a.detail) return a.detail;
+  return a.summary_status === "pending" ? "要約待ち" : "要約できませんでした";
 }
 
 async function toggle(a: Article) {

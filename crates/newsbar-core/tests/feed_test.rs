@@ -113,3 +113,26 @@ async fn fetch_rejects_oversized_feed() {
     let r = fetch_feed(&newsbar_core::http_client(), &url).await;
     assert_eq!(r, Err(FeedError::TooLarge));
 }
+
+/// サーバーが gzip で圧縮して返してきても読める（DeepMind のフィードで実際に起きた）
+#[tokio::test]
+async fn fetch_decodes_gzip_response() {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&fixture("rss2.xml")).unwrap();
+    let gzipped = encoder.finish().unwrap();
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/xml")
+                .insert_header("content-encoding", "gzip")
+                .set_body_bytes(gzipped),
+        )
+        .mount(&server)
+        .await;
+    let url = format!("{}/gzip.xml", server.uri());
+    let items = fetch_feed(&newsbar_core::http_client(), &url).await.unwrap();
+    assert_eq!(items.len(), 3);
+}
