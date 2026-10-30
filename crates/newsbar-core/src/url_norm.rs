@@ -13,6 +13,25 @@
 //! クエリは `query_pairs()` で読み、`query_pairs_mut()` か `set_query()` で書き戻す。
 
 /// URL を比較用に正規化する。
-pub fn normalize_url(_raw: &str) -> Option<String> {
-    todo!("段階2: ユーザーが実装")
+pub fn normalize_url(raw: &str) -> Option<String> {
+    let mut u = url::Url::parse(raw).ok()?;
+    if u.scheme() != "http" && u.scheme() != "https" {
+        return None;
+    }
+    u.set_fragment(None);
+    let mut pairs = u.query_pairs().into_owned().collect::<Vec<_>>();
+    pairs.retain(|(k, _)| !k.starts_with("utm_") && k != "fbclid" && k != "gclid" && k != "ref");
+    if pairs.is_empty() {
+        u.set_query(None);
+    } else {
+        u.query_pairs_mut().clear().extend_pairs(pairs);
+    }
+    let path = u.path().to_string();
+    if path != "/"
+        && let Some(new_path) = path.strip_suffix('/')
+    {
+        u.set_path(new_path);
+    }
+
+    Some(u.to_string())
 }
