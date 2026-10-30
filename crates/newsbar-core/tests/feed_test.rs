@@ -133,6 +133,8 @@ async fn fetch_decodes_gzip_response() {
         .mount(&server)
         .await;
     let url = format!("{}/gzip.xml", server.uri());
-    let items = fetch_feed(&newsbar_core::http_client(), &url).await.unwrap();
+    let items = fetch_feed(&newsbar_core::http_client(), &url)
+        .await
+        .unwrap();
     assert_eq!(items.len(), 3);
 }
