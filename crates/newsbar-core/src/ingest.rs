@@ -12,23 +12,50 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::model::{FeedItem, Source};
+use crate::model::{FeedItem, NewArticle, Source};
 use crate::store::{Store, StoreError};
 
+use crate::url_norm::normalize_url;
+
 /// 記事を見分ける key。guid があれば guid、なければ正規化した URL、どちらもなければ `None`。
-pub fn item_key(_item: &FeedItem) -> Option<String> {
-    todo!("段階2: ユーザーが実装")
+pub fn item_key(item: &FeedItem) -> Option<String> {
+    if let Some(guid) = &item.guid {
+        return Some(guid.clone());
+    }
+    if let Some(url) = &item.url {
+        return normalize_url(url);
+    }
+    None
 }
 
 /// 新着として取り込む記事を選ぶ（公開日時の新しい順）。
 ///
 /// `is_seen` は key を受け取り、取り込み済みなら true を返す関数。
 pub fn select_new_items(
-    _items: &[FeedItem],
-    _now: DateTime<Utc>,
-    _is_seen: impl Fn(&str) -> bool,
+    items: &[FeedItem],
+    now: DateTime<Utc>,
+    is_seen: impl Fn(&str) -> bool,
 ) -> Vec<FeedItem> {
-    todo!("段階2: ユーザーが実装")
+    let window = chrono::Duration::hours(crate::NEW_ITEM_WINDOW_HOURS);
+    let mut new_items: Vec<FeedItem> = items
+        .iter()
+        .filter(|item| {
+            let published = item.published.unwrap_or(now);
+            now.signed_duration_since(published) <= window
+        })
+        .filter(|item| {
+            if let Some(key) = item_key(item) {
+                !is_seen(&key)
+            } else {
+                false
+            }
+        })
+        .filter(|item| item.url.is_some())
+        .cloned()
+        .collect();
+    new_items.sort_by_key(|item| std::cmp::Reverse(item.published.unwrap_or(now).min(now)));
+    new_items.truncate(crate::MAX_NEW_PER_SOURCE);
+    new_items
 }
 
 /// 取り込みの結果
@@ -46,10 +73,37 @@ pub struct IngestReport {
 /// （published なし／未来は now、fetched_at は now、body_text には item.text を入れる）。
 /// そのあと key がある全アイテムを `mark_seen` する。
 pub fn ingest(
-    _store: &Store,
-    _source: &Source,
-    _items: &[FeedItem],
-    _now: DateTime<Utc>,
+    store: &Store,
+    source: &Source,
+    items: &[FeedItem],
+    now: DateTime<Utc>,
 ) -> Result<IngestReport, StoreError> {
-    todo!("段階2: ユーザーが実装")
+    let new_items = select_new_items(items, now, |key| {
+        store.is_seen(source.id, key).unwrap_or(false)
+    });
+    let mut report = IngestReport::default();
+    for item in &new_items {
+        let Some(url) = item.url.as_deref().and_then(normalize_url) else {
+            continue; // URL がない、または正規化できない記事はスキップ
+        };
+        let published_at = item.published.unwrap_or(now).min(now);
+        let new_article: NewArticle = NewArticle {
+            source_id: source.id,
+            url,
+            original_title: item.title.clone(),
+            published_at,
+            fetched_at: now,
+            body_text: item.text.clone(),
+        };
+        match store.insert_article(&new_article)? {
+            Some(_) => report.inserted += 1, // 保存できた
+            None => report.duplicates += 1,  // 同じURLがあった
+        }
+    }
+    for item in items {
+        if let Some(key) = item_key(item) {
+            store.mark_seen(source.id, &key, now)?;
+        }
+    }
+    Ok(report)
 }
