@@ -27,14 +27,51 @@ pub enum ExtractError {
 }
 
 /// HTML から本文を取り出す。本文が短すぎれば `None`。
-pub fn extract_main_text(_html: &str, _url: &str) -> Option<String> {
-    todo!("段階4: ユーザーが実装")
+pub fn extract_main_text(html: &str, url: &str) -> Option<String> {
+    let article = dom_smoothie::Readability::new(html, Some(url), None)
+        .ok()?
+        .parse()
+        .ok()?;
+    let text = article.text_content.trim();
+    (text.chars().count() >= crate::MIN_EXTRACTED_CHARS).then(|| text.to_string())
 }
 
 /// 記事ページを取得して本文を取り出す。HTML でなければ `Ok(None)`。
 pub async fn fetch_article_text(
-    _client: &reqwest::Client,
-    _url: &str,
+    client: &reqwest::Client,
+    url: &str,
 ) -> Result<Option<String>, ExtractError> {
-    todo!("段階4: ユーザーが実装")
+    let mut resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| ExtractError::Network(e.to_string()))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(ExtractError::Status(status.as_u16()));
+    }
+
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !content_type.starts_with("text/html") {
+        return Ok(None);
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| ExtractError::Network(e.to_string()))?
+    {
+        body.extend_from_slice(&chunk);
+        if body.len() > crate::MAX_ARTICLE_BYTES {
+            return Err(ExtractError::TooLarge);
+        }
+    }
+    let html = String::from_utf8_lossy(&body);
+    Ok(extract_main_text(&html, url))
 }
