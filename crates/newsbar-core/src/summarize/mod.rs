@@ -46,6 +46,6 @@ pub trait Summarizer: Send + Sync {
 }
 
 /// 文字数（バイト数ではない）で切り詰める。日本語をバイト単位で切ると文字が壊れるため。
-pub fn truncate_chars(_s: &str, _max: usize) -> String {
-    todo!("段階3: ユーザーが実装")
+pub fn truncate_chars(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
 }
