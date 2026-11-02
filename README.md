@@ -80,6 +80,14 @@ open target/release/bundle/macos/newsbar.app
 
 `.app` は App Sandbox を有効にし、ad-hoc 署名（`signingIdentity: "-"`）でまとめています。
 
+ビルドから `/Applications` への入れ替え・起動までをまとめて行う場合:
+
+```sh
+npm run install-app
+```
+
+ビルドや Sandbox 設定の確認に失敗したときは、`/Applications` の今のアプリには手を付けずに止まります。
+
 テストと静的チェック:
 
 ```sh
