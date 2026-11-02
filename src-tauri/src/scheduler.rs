@@ -47,7 +47,7 @@ pub async fn run_refresh(app: &AppHandle) -> Option<RefreshReport> {
     };
     let deps = RefreshDeps {
         http: state.http.clone(),
-        summarizer: make_summarizer(&state.http, &settings.model),
+        summarizer: make_summarizer(&state, &settings.model),
         language: settings.language,
     };
     let report = refresh(&state.store, &deps, Utc::now()).await;
@@ -63,10 +63,10 @@ pub async fn run_refresh(app: &AppHandle) -> Option<RefreshReport> {
     Some(report)
 }
 
-/// キーチェーンに APIキーがあれば、Claude の要約役を作る。
-fn make_summarizer(http: &reqwest::Client, model: &str) -> Option<Arc<dyn Summarizer>> {
-    let key = secrets::load_api_key().ok().flatten()?;
-    let summarizer = ClaudeSummarizer::new(http.clone(), &key, model).ok()?;
+/// APIキーがあれば、Claude の要約役を作る。キーチェーンを読むのは起動中に1回だけ。
+fn make_summarizer(state: &AppState, model: &str) -> Option<Arc<dyn Summarizer>> {
+    let key = state.api_key.get(secrets::load_api_key)?;
+    let summarizer = ClaudeSummarizer::new(state.http.clone(), &key, model).ok()?;
     Some(Arc::new(summarizer))
 }
 

@@ -9,6 +9,8 @@ use newsbar_core::summarize::claude::DEFAULT_MODEL;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
+use crate::secrets::KeyCache;
+
 /// 自動更新の間隔として選べる値（分）
 pub const INTERVAL_CHOICES: [u32; 4] = [30, 60, 180, 360];
 pub const DEFAULT_INTERVAL: u32 = 60;
@@ -23,6 +25,8 @@ pub struct AppState {
     /// 次の更新をすぐ始めたいときに通知する
     pub wake: Notify,
     pub refreshing: AtomicBool,
+    /// キーチェーンから読んだ APIキー（起動中に1回だけ読む）
+    pub api_key: KeyCache,
 }
 
 /// 画面に出す更新の状態

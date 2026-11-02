@@ -57,6 +57,7 @@ pub fn run() {
                 status: Mutex::new(AppStatus::default()),
                 wake: tokio::sync::Notify::new(),
                 refreshing: AtomicBool::new(false),
+                api_key: secrets::KeyCache::new(),
             });
 
             tray::setup(app.handle())?;

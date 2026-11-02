@@ -223,14 +223,15 @@ pub fn save_settings(state: State<'_, AppState>, settings: SettingsDto) -> Resul
 #[tauri::command]
 pub fn set_api_key(state: State<'_, AppState>, key: String) -> Result<(), String> {
     secrets::save_api_key(&key)?;
+    state.api_key.set(secrets::normalize_api_key(&key));
     state.wake.notify_one();
     Ok(())
 }
 
 /// APIキーが保存されているか（キーそのものは画面に渡さない）。
 #[tauri::command]
-pub fn has_api_key() -> bool {
-    secrets::has_api_key()
+pub fn has_api_key(state: State<'_, AppState>) -> bool {
+    state.api_key.get(secrets::load_api_key).is_some()
 }
 
 #[tauri::command]
