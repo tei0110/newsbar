@@ -77,6 +77,11 @@ fn deps_with(summarizer: Arc<FakeSummarizer>) -> RefreshDeps {
 /// 取得には失敗する（接続できない）情報源を1つ作り、要約待ちの記事を `bodies` の数だけ入れる。
 /// 記事は新しい順に「title 0」「title 1」…となる
 fn store_with_pending(titles_and_bodies: &[(&str, &str)]) -> (Mutex<Store>, i64) {
+    store_with_pending_at("https://x.example", titles_and_bodies)
+}
+
+/// 記事の URL を `{base}/{番号}` にする版（記事ページを偽のサーバーから返すとき用）
+fn store_with_pending_at(base: &str, titles_and_bodies: &[(&str, &str)]) -> (Mutex<Store>, i64) {
     let store = Store::open_in_memory().unwrap();
     let src = store
         .add_source("A", "http://127.0.0.1:9/feed", "AI", true)
@@ -85,7 +90,7 @@ fn store_with_pending(titles_and_bodies: &[(&str, &str)]) -> (Mutex<Store>, i64)
         store
             .insert_article(&NewArticle {
                 source_id: src.id,
-                url: format!("https://x.example/{i}"),
+                url: format!("{base}/{i}"),
                 original_title: title.to_string(),
                 published_at: now() - Duration::minutes(i as i64),
                 fetched_at: now(),
@@ -309,19 +314,105 @@ async fn long_body_is_truncated_before_summarizing() {
     );
 }
 
+/// 記事ページを返す偽のサーバー。`pages` は (パス, HTMLか404か)
+async fn article_server(pages: &[(&str, Option<Vec<u8>>)]) -> MockServer {
+    let server = MockServer::start().await;
+    for (p, page) in pages {
+        let response = match page {
+            Some(html) => {
+                ResponseTemplate::new(200).set_body_raw(html.clone(), "text/html; charset=utf-8")
+            }
+            None => ResponseTemplate::new(404),
+        };
+        Mock::given(method("GET"))
+            .and(path(*p))
+            .respond_with(response)
+            .mount(&server)
+            .await;
+    }
+    server
+}
+
 #[tokio::test]
-async fn short_feed_text_is_skipped_for_now() {
-    let (store, _) = store_with_pending(&[("short", "百文字未満の本文"), ("empty", "")]);
+async fn short_feed_text_fetches_article_page() {
+    let server = article_server(&[("/0", Some(fixture("article.html")))]).await;
+    let (store, _) = store_with_pending_at(&server.uri(), &[("short", "短い概要")]);
+    let fake = FakeSummarizer::ok();
+
+    let report = refresh(&store, &deps_with(fake.clone()), now()).await;
+
+    assert_eq!(report.summarized, 1);
+    assert!(
+        fake.calls.lock().unwrap()[0]
+            .body_text
+            .contains("Paragraph one")
+    );
+    let saved = store.lock().unwrap().list_articles(None, true).unwrap();
+    assert_eq!(saved[0].summary_status, SummaryStatus::Done);
+    assert!(
+        saved[0]
+            .body_text
+            .as_deref()
+            .is_some_and(|b| b.contains("Paragraph one")),
+        "取り出した本文を保存しておく"
+    );
+}
+
+#[tokio::test]
+async fn unreachable_article_falls_back_to_feed_text() {
+    let server = article_server(&[("/0", None)]).await;
+    let feed_text = "フィードの概要".repeat(10);
+    let (store, _) = store_with_pending_at(&server.uri(), &[("short", &feed_text)]);
+    let fake = FakeSummarizer::ok();
+
+    let report = refresh(&store, &deps_with(fake.clone()), now()).await;
+
+    assert_eq!(report.summarized, 1);
+    assert_eq!(fake.calls.lock().unwrap()[0].body_text, feed_text);
+    assert_eq!(statuses(&store)[0].1, SummaryStatus::Done);
+}
+
+#[tokio::test]
+async fn no_text_anywhere_is_skipped() {
+    let server = article_server(&[("/0", None)]).await;
+    let (store, _) = store_with_pending_at(&server.uri(), &[("empty", "")]);
     let fake = FakeSummarizer::ok();
 
     let report = refresh(&store, &deps_with(fake.clone()), now()).await;
 
     assert_eq!(report.summarized, 0);
     assert!(fake.calls.lock().unwrap().is_empty());
-    assert!(
-        statuses(&store)
-            .iter()
-            .all(|(_, s)| *s == SummaryStatus::Skipped)
+    assert_eq!(statuses(&store)[0].1, SummaryStatus::Skipped);
+}
+
+#[tokio::test]
+async fn skipped_articles_do_not_count_toward_cap() {
+    // 新しい10件は本文がどこにもない（飛ばす）、古い30件は本文が十分にある
+    let server = article_server(&[]).await; // どのパスも 404
+    let body = long_body();
+    let titles: Vec<String> = (0..40).map(|i| format!("t{i}")).collect();
+    let pairs: Vec<(&str, &str)> = titles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.as_str(), if i < 10 { "" } else { body.as_str() }))
+        .collect();
+    let (store, _) = store_with_pending_at(&server.uri(), &pairs);
+
+    let report = refresh(&store, &deps_with(FakeSummarizer::ok()), now()).await;
+
+    assert_eq!(report.summarized, newsbar_core::MAX_SUMMARIES_PER_REFRESH);
+    let all = statuses(&store);
+    assert_eq!(
+        all.iter()
+            .filter(|(_, s)| *s == SummaryStatus::Skipped)
+            .count(),
+        10
+    );
+    assert_eq!(
+        all.iter()
+            .filter(|(_, s)| *s == SummaryStatus::Pending)
+            .count(),
+        0
     );
 }
 
