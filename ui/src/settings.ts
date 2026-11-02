@@ -2,15 +2,18 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   type Recommended,
+  type Settings,
   type Source,
   addRecommended,
   addSource,
   deleteSource,
   el,
   getSettings,
+  hasApiKey,
   listRecommended,
   listSources,
   saveSettings,
+  setApiKey,
   setSourceEnabled,
 } from "./api";
 
@@ -115,15 +118,55 @@ $("add-form").addEventListener("submit", async (e) => {
   }
 });
 
-$<HTMLSelectElement>("interval").addEventListener("change", async (e) => {
-  const minutes = Number((e.target as HTMLSelectElement).value);
-  await saveSettings({ refresh_interval_minutes: minutes });
+/** 画面の入力欄から、保存する設定を組み立てる */
+function currentSettings(): Settings {
+  return {
+    refresh_interval_minutes: Number($<HTMLSelectElement>("interval").value),
+    model: $<HTMLInputElement>("model").value,
+    language: $<HTMLSelectElement>("language").value as Settings["language"],
+  };
+}
+
+async function save() {
+  const error = $("settings-error");
+  try {
+    await saveSettings(currentSettings());
+    error.hidden = true;
+  } catch (err) {
+    error.textContent = String(err);
+    error.hidden = false;
+  }
+}
+
+$("interval").addEventListener("change", () => void save());
+$("language").addEventListener("change", () => void save());
+$("model").addEventListener("change", () => void save());
+
+async function renderKeyStatus() {
+  $("key-status").textContent = (await hasApiKey()) ? "保存済み（キーチェーン）" : "未設定";
+}
+
+$("key-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $<HTMLInputElement>("api-key");
+  const error = $("settings-error");
+  try {
+    await setApiKey(input.value);
+    input.value = "";
+    error.hidden = true;
+  } catch (err) {
+    error.textContent = String(err);
+    error.hidden = false;
+  }
+  await renderKeyStatus();
 });
 
 async function init() {
   const settings = await getSettings();
   $<HTMLSelectElement>("interval").value = String(settings.refresh_interval_minutes);
-  await Promise.all([renderSources(), renderRecommended()]);
+  $<HTMLInputElement>("model").value = settings.model;
+  $<HTMLSelectElement>("language").value = settings.language;
+  await Promise.all([renderSources(), renderRecommended(), renderKeyStatus()]);
 }
 
 // 更新が終わったら、最終取得やエラーの表示を新しくする

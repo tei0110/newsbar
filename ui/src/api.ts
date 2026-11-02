@@ -51,6 +51,8 @@ export interface Recommended {
 
 export interface Settings {
   refresh_interval_minutes: number;
+  model: string;
+  language: "ja" | "en";
 }
 
 export interface RefreshReport {
@@ -78,6 +80,8 @@ export const listRecommended = () => invoke<Recommended[]>("list_recommended");
 export const addRecommended = (feedUrl: string) => invoke<Source>("add_recommended", { feedUrl });
 export const getSettings = () => invoke<Settings>("get_settings");
 export const saveSettings = (settings: Settings) => invoke<void>("save_settings", { settings });
+export const setApiKey = (key: string) => invoke<void>("set_api_key", { key });
+export const hasApiKey = () => invoke<boolean>("has_api_key");
 export const openSettings = () => invoke<void>("open_settings");
 
 /** 小さな DOM 組み立て用の関数。文字列は必ず textContent で入れる（フィード由来の文字列を HTML として扱わない） */

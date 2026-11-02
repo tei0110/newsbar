@@ -3,6 +3,7 @@
 mod commands;
 mod display;
 mod scheduler;
+mod secrets;
 mod state;
 mod tray;
 
@@ -36,6 +37,8 @@ pub fn run() {
             commands::add_recommended,
             commands::get_settings,
             commands::save_settings,
+            commands::set_api_key,
+            commands::has_api_key,
             commands::open_settings,
         ])
         .setup(|app| {

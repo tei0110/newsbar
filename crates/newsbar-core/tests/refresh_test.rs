@@ -1,10 +1,11 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, TimeZone, Utc};
-use newsbar_core::model::NewArticle;
+use chrono::{DateTime, Duration, TimeZone, Utc};
+use newsbar_core::model::{NewArticle, Summary, SummaryStatus};
 use newsbar_core::presets::{DEFAULT_SOURCES, RECOMMENDED_SOURCES, seed_defaults};
 use newsbar_core::refresh::{RefreshDeps, refresh, validate_feed_url};
 use newsbar_core::store::Store;
+use newsbar_core::summarize::{SummarizeError, Summarizer, SummaryInput};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -21,7 +22,89 @@ fn now() -> DateTime<Utc> {
 fn deps() -> RefreshDeps {
     RefreshDeps {
         http: newsbar_core::http_client(),
+        summarizer: None,
+        language: "ja".into(),
     }
+}
+
+/// 決まった結果を返す要約役。タイトルが "refuse" で始まる記事だけ断る
+struct FakeSummarizer {
+    error: Option<fn() -> SummarizeError>,
+    calls: Mutex<Vec<SummaryInput>>,
+}
+
+impl FakeSummarizer {
+    fn ok() -> Arc<Self> {
+        Arc::new(Self {
+            error: None,
+            calls: Mutex::new(Vec::new()),
+        })
+    }
+    fn failing(error: fn() -> SummarizeError) -> Arc<Self> {
+        Arc::new(Self {
+            error: Some(error),
+            calls: Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl Summarizer for FakeSummarizer {
+    async fn summarize(&self, input: &SummaryInput) -> Result<Summary, SummarizeError> {
+        self.calls.lock().unwrap().push(input.clone());
+        if let Some(make_error) = self.error {
+            return Err(make_error());
+        }
+        if input.title.starts_with("refuse") {
+            return Err(SummarizeError::Refused);
+        }
+        Ok(Summary {
+            title: format!("要約: {}", input.title),
+            one_line: "一言".into(),
+            detail: "詳しい要約".into(),
+        })
+    }
+}
+
+fn deps_with(summarizer: Arc<FakeSummarizer>) -> RefreshDeps {
+    RefreshDeps {
+        http: newsbar_core::http_client(),
+        summarizer: Some(summarizer),
+        language: "ja".into(),
+    }
+}
+
+/// 取得には失敗する（接続できない）情報源を1つ作り、要約待ちの記事を `bodies` の数だけ入れる。
+/// 記事は新しい順に「title 0」「title 1」…となる
+fn store_with_pending(titles_and_bodies: &[(&str, &str)]) -> (Mutex<Store>, i64) {
+    let store = Store::open_in_memory().unwrap();
+    let src = store
+        .add_source("A", "http://127.0.0.1:9/feed", "AI", true)
+        .unwrap();
+    for (i, (title, body)) in titles_and_bodies.iter().enumerate() {
+        store
+            .insert_article(&NewArticle {
+                source_id: src.id,
+                url: format!("https://x.example/{i}"),
+                original_title: title.to_string(),
+                published_at: now() - Duration::minutes(i as i64),
+                fetched_at: now(),
+                body_text: (!body.is_empty()).then(|| body.to_string()),
+            })
+            .unwrap();
+    }
+    (Mutex::new(store), src.id)
+}
+
+fn statuses(store: &Mutex<Store>) -> Vec<(String, SummaryStatus)> {
+    store
+        .lock()
+        .unwrap()
+        .list_articles(None, true)
+        .unwrap()
+        .into_iter()
+        .map(|a| (a.original_title, a.summary_status))
+        .collect()
 }
 
 #[tokio::test]
@@ -182,4 +265,132 @@ fn presets_match_spec_counts() {
         );
         assert!(p.feed_url.starts_with("https://"), "{}", p.feed_url);
     }
+}
+
+fn long_body() -> String {
+    "本文".repeat(300) // 600文字（ENOUGH_FEED_TEXT_CHARS 以上）
+}
+
+#[tokio::test]
+async fn summaries_are_saved() {
+    let body = long_body();
+    let (store, _) = store_with_pending(&[("first", &body), ("second", &body)]);
+    let fake = FakeSummarizer::ok();
+
+    let report = refresh(&store, &deps_with(fake.clone()), now()).await;
+
+    assert_eq!(report.summarized, 2);
+    assert_eq!(report.summary_error, None);
+    let articles = store.lock().unwrap().list_articles(None, true).unwrap();
+    assert!(
+        articles
+            .iter()
+            .all(|a| a.summary_status == SummaryStatus::Done)
+    );
+    assert_eq!(articles[0].title.as_deref(), Some("要約: first"));
+    let calls = fake.calls.lock().unwrap();
+    assert_eq!(calls[0].source_name, "A");
+    assert_eq!(calls[0].language, "ja");
+    assert_eq!(calls[0].body_text, body);
+}
+
+#[tokio::test]
+async fn long_body_is_truncated_before_summarizing() {
+    let body = "あ".repeat(newsbar_core::MAX_BODY_CHARS + 50);
+    let (store, _) = store_with_pending(&[("first", &body)]);
+    let fake = FakeSummarizer::ok();
+
+    refresh(&store, &deps_with(fake.clone()), now()).await;
+
+    let calls = fake.calls.lock().unwrap();
+    assert_eq!(
+        calls[0].body_text.chars().count(),
+        newsbar_core::MAX_BODY_CHARS
+    );
+}
+
+#[tokio::test]
+async fn short_feed_text_is_skipped_for_now() {
+    let (store, _) = store_with_pending(&[("short", "百文字未満の本文"), ("empty", "")]);
+    let fake = FakeSummarizer::ok();
+
+    let report = refresh(&store, &deps_with(fake.clone()), now()).await;
+
+    assert_eq!(report.summarized, 0);
+    assert!(fake.calls.lock().unwrap().is_empty());
+    assert!(
+        statuses(&store)
+            .iter()
+            .all(|(_, s)| *s == SummaryStatus::Skipped)
+    );
+}
+
+#[tokio::test]
+async fn unauthorized_stops_and_keeps_pending() {
+    let body = long_body();
+    let (store, _) = store_with_pending(&[("first", &body), ("second", &body)]);
+    let fake = FakeSummarizer::failing(|| SummarizeError::Unauthorized);
+
+    let report = refresh(&store, &deps_with(fake.clone()), now()).await;
+
+    assert_eq!(report.summary_error.as_deref(), Some("APIキーが無効です"));
+    assert_eq!(fake.calls.lock().unwrap().len(), 1, "1件目で止める");
+    assert!(
+        statuses(&store)
+            .iter()
+            .all(|(_, s)| *s == SummaryStatus::Pending)
+    );
+}
+
+#[tokio::test]
+async fn refused_marks_only_that_article_failed() {
+    let body = long_body();
+    let (store, _) = store_with_pending(&[("refuse me", &body), ("fine", &body)]);
+
+    let report = refresh(&store, &deps_with(FakeSummarizer::ok()), now()).await;
+
+    assert_eq!(report.summarized, 1);
+    assert_eq!(report.summary_error, None);
+    assert_eq!(
+        statuses(&store),
+        vec![
+            ("refuse me".to_string(), SummaryStatus::Failed),
+            ("fine".to_string(), SummaryStatus::Done),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn summarization_is_capped_per_refresh() {
+    let body = long_body();
+    let titles: Vec<String> = (0..35).map(|i| format!("t{i}")).collect();
+    let pairs: Vec<(&str, &str)> = titles.iter().map(|t| (t.as_str(), body.as_str())).collect();
+    let (store, _) = store_with_pending(&pairs);
+
+    let report = refresh(&store, &deps_with(FakeSummarizer::ok()), now()).await;
+
+    assert_eq!(report.summarized, newsbar_core::MAX_SUMMARIES_PER_REFRESH);
+    let pending = statuses(&store)
+        .iter()
+        .filter(|(_, s)| *s == SummaryStatus::Pending)
+        .count();
+    assert_eq!(pending, 35 - newsbar_core::MAX_SUMMARIES_PER_REFRESH);
+}
+
+#[tokio::test]
+async fn no_summarizer_reports_missing_key() {
+    let body = long_body();
+    let (store, _) = store_with_pending(&[("first", &body)]);
+
+    let report = refresh(&store, &deps(), now()).await;
+
+    assert!(
+        report
+            .summary_error
+            .as_deref()
+            .is_some_and(|m| m.starts_with("APIキーが設定されていません")),
+        "got {:?}",
+        report.summary_error
+    );
+    assert_eq!(statuses(&store)[0].1, SummaryStatus::Pending);
 }

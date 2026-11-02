@@ -30,6 +30,34 @@
     <h2>おすすめ</h2>
     <div id="recommended" class="card"></div>
 
+    <h2>AI要約</h2>
+    <div class="card">
+      <form id="key-form" class="row">
+        <label class="grow">
+          <div class="name">APIキー（Anthropic）</div>
+          <input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off" />
+        </label>
+        <span id="key-status" class="badge"></span>
+        <button id="key-save" type="submit">保存</button>
+      </form>
+      <div class="row">
+        <label class="grow">
+          <div class="name">モデル</div>
+          <input id="model" type="text" spellcheck="false" />
+        </label>
+      </div>
+      <div class="row">
+        <label class="grow">
+          <div class="name">要約の言語</div>
+          <select id="language">
+            <option value="ja">日本語</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+      </div>
+      <div id="settings-error" class="form-error" hidden></div>
+    </div>
+
     <h2>自動更新の間隔</h2>
     <div class="card">
       <div class="row">

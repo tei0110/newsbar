@@ -305,3 +305,9 @@ select {
   font-size: 12px;
   padding: 0 10px 8px;
 }
+
+.row label.grow input,
+.row label.grow select {
+  width: 100%;
+  margin-top: 4px;
+}

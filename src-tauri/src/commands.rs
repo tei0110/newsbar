@@ -13,7 +13,7 @@ use crate::display::age_label;
 use crate::state::{
     AppState, AppStatus, SettingsDto, load_settings, save_settings as store_settings,
 };
-use crate::{scheduler, tray};
+use crate::{scheduler, secrets, tray};
 
 /// 画面に渡す記事
 #[derive(Debug, Clone, Serialize)]
@@ -217,6 +217,20 @@ pub fn save_settings(state: State<'_, AppState>, settings: SettingsDto) -> Resul
     // 新しい間隔で待ち直す
     state.wake.notify_one();
     Ok(())
+}
+
+/// APIキーをキーチェーンに保存する（空なら消す）。保存したらすぐ更新して要約を始める。
+#[tauri::command]
+pub fn set_api_key(state: State<'_, AppState>, key: String) -> Result<(), String> {
+    secrets::save_api_key(&key)?;
+    state.wake.notify_one();
+    Ok(())
+}
+
+/// APIキーが保存されているか（キーそのものは画面に渡さない）。
+#[tauri::command]
+pub fn has_api_key() -> bool {
+    secrets::has_api_key()
 }
 
 #[tauri::command]
