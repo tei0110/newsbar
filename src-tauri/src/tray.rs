@@ -6,6 +6,9 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_positioner::{Position, WindowExt};
 
+use crate::scheduler;
+use crate::state::AppState;
+
 const TRAY_ID: &str = "main";
 pub const POPOVER: &str = "popover";
 pub const SETTINGS: &str = "settings";
@@ -60,6 +63,11 @@ fn toggle_popover(app: &AppHandle) {
     let _ = window.show();
     let _ = window.set_focus();
     let _ = app.emit_to(POPOVER, "popover-shown", ());
+
+    // スリープ明けなどで更新の時刻を過ぎていたら、開いたときにすぐ更新を始める
+    if scheduler::refresh_is_due(app) {
+        app.state::<AppState>().wake.notify_one();
+    }
 }
 
 /// メニューバーのアイコン横に未読件数を出す（0件なら消す）。

@@ -368,17 +368,21 @@ async fn short_feed_text_fetches_article_page() {
 }
 
 #[tokio::test]
-async fn unreachable_article_falls_back_to_feed_text() {
+async fn unreachable_article_with_short_feed_text_is_skipped() {
+    // 設計書 8.2 ③: フィードの本文が足りず、記事ページからも取れなければ要約しない。
+    // Hacker News のフィードの本文（"Article URL / Points: 120" など）だけで要約すると、
+    // 中身のない要約が完了扱いで保存されてしまうため
     let server = article_server(&[("/0", None)]).await;
-    let feed_text = "フィードの概要".repeat(10);
-    let (store, _) = store_with_pending_at(&server.uri(), &[("short", &feed_text)]);
+    let feed_text =
+        "Article URL: https://example.com/a Comments URL: https://news.example/1 Points: 120";
+    let (store, _) = store_with_pending_at(&server.uri(), &[("short", feed_text)]);
     let fake = FakeSummarizer::ok();
 
     let report = refresh(&store, &deps_with(fake.clone()), now()).await;
 
-    assert_eq!(report.summarized, 1);
-    assert_eq!(fake.calls.lock().unwrap()[0].body_text, feed_text);
-    assert_eq!(statuses(&store)[0].1, SummaryStatus::Done);
+    assert_eq!(report.summarized, 0);
+    assert!(fake.calls.lock().unwrap().is_empty());
+    assert_eq!(statuses(&store)[0].1, SummaryStatus::Skipped);
 }
 
 #[tokio::test]

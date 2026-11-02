@@ -47,6 +47,20 @@ fn atom_relative_link_is_resolved() {
 }
 
 #[test]
+fn atom_uses_alternate_link_not_first_link() {
+    // Blogger 形式では、記事ページ（rel="alternate"）より前にコメント用などのリンクが並ぶ
+    let items = parse_feed(
+        &fixture("atom_blogger.xml"),
+        "https://example.blogspot.com/feeds/posts/summary",
+    )
+    .unwrap();
+    assert_eq!(
+        items[0].url.as_deref(),
+        Some("https://example.blogspot.com/2026/10/a-blogger-post.html")
+    );
+}
+
+#[test]
 fn rdf_dc_date_is_parsed() {
     let items = parse_feed(&fixture("rdf.xml"), "https://jp.example.org/rss.rdf").unwrap();
     assert_eq!(items.len(), 2);

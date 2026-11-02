@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Blogger 形式の Atom（Google Project Zero など）。記事ページ（rel="alternate"）より前に、
+     コメント用・編集用・自分自身のリンクが並ぶ -->
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>tag:blogger.com,1999:blog-1</id>
+  <updated>2026-10-30T12:00:00Z</updated>
+  <title type="text">Example Blogger Blog</title>
+  <link rel="alternate" type="text/html" href="https://example.blogspot.com/"/>
+  <entry>
+    <id>tag:blogger.com,1999:blog-1.post-100</id>
+    <published>2026-10-30T12:00:00Z</published>
+    <updated>2026-10-30T12:00:00Z</updated>
+    <title type="text">A Blogger post</title>
+    <summary type="text">Summary of the Blogger post.</summary>
+    <link rel="replies" type="application/atom+xml" href="https://example.blogspot.com/feeds/100/comments/default" title="Post Comments"/>
+    <link rel="replies" type="text/html" href="https://example.blogspot.com/2026/10/a-blogger-post.html#comment-form" title="0 Comments"/>
+    <link rel="edit" type="application/atom+xml" href="https://www.blogger.com/feeds/1/posts/default/100"/>
+    <link rel="self" type="application/atom+xml" href="https://www.blogger.com/feeds/1/posts/default/100"/>
+    <link rel="alternate" type="text/html" href="https://example.blogspot.com/2026/10/a-blogger-post.html" title="A Blogger post"/>
+  </entry>
+</feed>

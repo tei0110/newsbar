@@ -173,7 +173,8 @@ fn is_blank(summary: &Summary) -> bool {
 ///
 /// 1. フィードの本文が十分に長ければ、それを使う
 /// 2. 短ければ記事ページから本文を取り出し、取れたら保存して使う
-/// 3. それもだめなら、短くてもフィードの本文を使う。まったくなければ `None`（要約しない）
+/// 3. それもだめなら `None`（要約しない。設計書 8.2 ③）。短いフィードの本文だけで要約すると、
+///    Hacker News の定型文（"Points: 120" など）から中身のない要約ができてしまうため
 async fn resolve_body(
     store: &Mutex<Store>,
     http: &reqwest::Client,
@@ -187,7 +188,7 @@ async fn resolve_body(
         let _ = lock(store).set_body_text(article.id, &page_text);
         return Some(page_text);
     }
-    (!feed_text.trim().is_empty()).then_some(feed_text)
+    None
 }
 
 /// 情報源として追加する前に、フィードとして読めるか確かめる。読めた記事数か、日本語の理由を返す。

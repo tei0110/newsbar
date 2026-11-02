@@ -45,11 +45,18 @@ pub fn parse_feed(bytes: &[u8], feed_url: &str) -> Result<Vec<FeedItem>, FeedErr
     for entry in feed.entries {
         let a = FeedItem {
             guid: entry.id.into(),
-            url: entry.links.first().map(|l| {
-                base.as_ref()
-                    .and_then(|b| b.join(&l.href).ok().map(|u| u.to_string()))
-                    .unwrap_or_else(|| l.href.clone())
-            }),
+            // 記事ページのリンクは rel="alternate"（rel がなければ alternate とみなす）。
+            // Blogger などはその前にコメント用・編集用のリンクを並べるので、最初のリンクとは限らない
+            url: entry
+                .links
+                .iter()
+                .find(|l| matches!(l.rel.as_deref(), None | Some("alternate")))
+                .or(entry.links.first())
+                .map(|l| {
+                    base.as_ref()
+                        .and_then(|b| b.join(&l.href).ok().map(|u| u.to_string()))
+                        .unwrap_or_else(|| l.href.clone())
+                }),
             title: entry
                 .title
                 .as_ref()
