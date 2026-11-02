@@ -13,7 +13,7 @@ use crate::display::age_label;
 use crate::state::{
     AppState, AppStatus, SettingsDto, load_settings, save_settings as store_settings,
 };
-use crate::{scheduler, secrets, tray};
+use crate::{autostart, scheduler, secrets, tray};
 
 /// 画面に渡す記事
 #[derive(Debug, Clone, Serialize)]
@@ -232,6 +232,18 @@ pub fn set_api_key(state: State<'_, AppState>, key: String) -> Result<(), String
 #[tauri::command]
 pub fn has_api_key(state: State<'_, AppState>) -> bool {
     state.api_key.get(secrets::load_api_key).is_some()
+}
+
+/// ログイン時に起動する設定になっているか（macOS の登録状態をそのまま返す）
+#[tauri::command]
+pub fn get_autostart() -> bool {
+    autostart::is_on(autostart::current())
+}
+
+/// ログイン時の起動をオン・オフする
+#[tauri::command]
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    autostart::apply(enabled)
 }
 
 #[tauri::command]

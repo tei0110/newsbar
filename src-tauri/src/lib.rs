@@ -1,5 +1,6 @@
 //! newsbar の Mac アプリ本体（メニューバー・小窓・設定画面）。
 
+mod autostart;
 mod commands;
 mod display;
 mod scheduler;
@@ -39,6 +40,8 @@ pub fn run() {
             commands::save_settings,
             commands::set_api_key,
             commands::has_api_key,
+            commands::get_autostart,
+            commands::set_autostart,
             commands::open_settings,
         ])
         .setup(|app| {

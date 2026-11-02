@@ -23,3 +23,6 @@ tauri = { version = "2.12.5", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2.7.2"
 tauri-plugin-positioner = { version = "2.4.0", features = ["tray-icon"] }
 tokio.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+smappservice-rs = "0.1.3"

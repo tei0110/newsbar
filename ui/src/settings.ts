@@ -8,12 +8,14 @@ import {
   addSource,
   deleteSource,
   el,
+  getAutostart,
   getSettings,
   hasApiKey,
   listRecommended,
   listSources,
   saveSettings,
   setApiKey,
+  setAutostart,
   setSourceEnabled,
 } from "./api";
 
@@ -161,12 +163,29 @@ $("key-form").addEventListener("submit", async (e) => {
   await renderKeyStatus();
 });
 
+// スイッチの見た目は、操作のあと macOS の登録状態に合わせ直す（失敗や許可待ちでも実際の状態を見せる）
+async function renderAutostart() {
+  $<HTMLInputElement>("autostart").checked = await getAutostart();
+}
+
+$("autostart").addEventListener("change", async () => {
+  const error = $("autostart-error");
+  try {
+    await setAutostart($<HTMLInputElement>("autostart").checked);
+    error.hidden = true;
+  } catch (err) {
+    error.textContent = String(err);
+    error.hidden = false;
+  }
+  await renderAutostart();
+});
+
 async function init() {
   const settings = await getSettings();
   $<HTMLSelectElement>("interval").value = String(settings.refresh_interval_minutes);
   $<HTMLInputElement>("model").value = settings.model;
   $<HTMLSelectElement>("language").value = settings.language;
-  await Promise.all([renderSources(), renderRecommended(), renderKeyStatus()]);
+  await Promise.all([renderSources(), renderRecommended(), renderKeyStatus(), renderAutostart()]);
 }
 
 // 更新が終わったら、最終取得やエラーの表示を新しくする

@@ -311,3 +311,9 @@ select {
   width: 100%;
   margin-top: 4px;
 }
+
+/* チェックボックスは文字と同じ行に置く */
+.row label.grow input[type="checkbox"] {
+  width: auto;
+  margin: 0 6px 0 0;
+}
