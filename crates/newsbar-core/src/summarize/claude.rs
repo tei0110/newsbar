@@ -8,19 +8,22 @@
 //! ```json
 //! {"model": "<model>", "max_tokens": 2048,
 //!  "system": "<下の SYSTEM_PROMPT の {LANG} を置き換えたもの>",
-//!  "messages": [{"role": "user", "content": "Title: <title>\nSource: <source_name>\nURL: <url>\n\n<body_text>"}],
-//!  "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": {
-//!    "type": "object", "additionalProperties": false, "required": ["title", "one_line", "detail"],
-//!    "properties": {"title": {"type": "string"}, "one_line": {"type": "string"}, "detail": {"type": "string"}}}}}}
+//!  "messages": [{"role": "user", "content":
+//!    "Title: <title>\nSource: <source_name>\nURL: <url>\n\n<body_text>\n\n(Write every field in {LANG}.)"}],
+//!  "output_config": {"effort": "low"}}
 //! ```
 //!
 //! `{LANG}` は language が "ja" なら `Japanese`、"en" なら `English`。
 //!
+//! 構造化出力（`output_config.format` の json_schema）は使わない。effort low と組み合わせると、
+//! 正常終了（end_turn）のまま全項目が空文字の要約が 3 回に 1 回ほど返るため（2026-11-02 に実 API で確認）。
+//! 代わりに、`<title>…</title>` などのタグで区切ったテキストで返してもらう。
+//!
 //! 応答の扱い:
 //! - HTTP 401・403 → `Unauthorized`、429 → `RateLimited`、そのほかの 200 以外 → `Http(status, 本文)`
 //! - `stop_reason` が `"refusal"` → `Refused`、`"max_tokens"` → `InvalidResponse("max_tokens")`
-//! - `content` 配列から `"type": "text"` のブロックを探し、その `text` を JSON として `Summary` に読む。
-//!   `"type": "thinking"` のブロックは無視する
+//! - `content` 配列から `"type": "text"` のブロックを探し、その `text` から 3 つのタグの中身を取り出す。
+//!   タグが無い・閉じていない・中身が空なら `InvalidResponse`。`"type": "thinking"` のブロックは無視する
 //! - 送信自体の失敗（つながらない等）→ `Network`
 
 use serde_json::json;
@@ -41,7 +44,11 @@ If the text is short or unclear, summarize only what it actually says.
 Fields:
 - title: the article title in {LANG} (keep it unchanged if it is already in {LANG})
 - one_line: the key point in at most 30 Japanese characters (or about 60 characters in English)
-- detail: 2 to 3 sentences with the most important facts";
+- detail: 2 to 3 sentences with the most important facts
+Return exactly three lines and nothing else:
+<title>...</title>
+<one_line>...</one_line>
+<detail>...</detail>";
 
 /// Claude で要約する
 pub struct ClaudeSummarizer {
@@ -88,24 +95,12 @@ impl Summarizer for ClaudeSummarizer {
             "system": SYSTEM_PROMPT.replace("{LANG}", lang),
             "messages": [{
                 "role": "user",
-                "content": format!("Title: {}\nSource: {}\nURL: {}\n\n{}", input.title, input.source_name, input.url, input.body_text)
+                "content": format!(
+                    "Title: {}\nSource: {}\nURL: {}\n\n{}\n\n(Write every field in {lang}.)",
+                    input.title, input.source_name, input.url, input.body_text
+                )
             }],
-            "output_config": {
-                "effort": "low",
-                "format": {
-                    "type": "json_schema",
-                    "schema": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["title", "one_line", "detail"],
-                        "properties": {
-                            "title": {"type": "string"},
-                            "one_line": {"type": "string"},
-                            "detail": {"type": "string"}
-                        }
-                    }
-                }
-            }
+            "output_config": {"effort": "low"}
         });
 
         // ② 送る（失敗したら Network）
@@ -159,9 +154,33 @@ impl Summarizer for ClaudeSummarizer {
             .find(|b| b.kind == "text")
             .and_then(|b| b.text.as_deref())
             .ok_or_else(|| SummarizeError::InvalidResponse("No text block found".to_string()))?;
-        serde_json::from_str::<Summary>(text)
-            .map_err(|e| SummarizeError::InvalidResponse(e.to_string()))
+        parse_tagged(text)
     }
+}
+
+/// `<title>…</title>` `<one_line>…</one_line>` `<detail>…</detail>` の中身を取り出す。
+/// どれかが無い・閉じていない・中身が空なら `InvalidResponse`。
+fn parse_tagged(text: &str) -> Result<Summary, SummarizeError> {
+    Ok(Summary {
+        title: tag_content(text, "title")?,
+        one_line: tag_content(text, "one_line")?,
+        detail: tag_content(text, "detail")?,
+    })
+}
+
+/// 最初に出てくる `<name>` から次の `</name>` までの中身（前後の空白を除く）
+fn tag_content(text: &str, name: &str) -> Result<String, SummarizeError> {
+    let open = format!("<{name}>");
+    let close = format!("</{name}>");
+    let content = text
+        .split_once(&open)
+        .and_then(|(_, rest)| rest.split_once(&close))
+        .map(|(inner, _)| inner.trim())
+        .ok_or_else(|| SummarizeError::InvalidResponse(format!("{open} が見つかりません")))?;
+    if content.is_empty() {
+        return Err(SummarizeError::InvalidResponse(format!("{open} が空です")));
+    }
+    Ok(content.to_string())
 }
 #[derive(serde::Deserialize)]
 struct ApiResponse {

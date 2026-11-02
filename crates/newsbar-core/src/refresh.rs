@@ -9,7 +9,7 @@ use tokio::task::JoinSet;
 use crate::extract::fetch_article_text;
 use crate::feed::{FeedError, fetch_feed};
 use crate::ingest::ingest;
-use crate::model::{Article, FeedItem, SummaryStatus};
+use crate::model::{Article, FeedItem, Summary, SummaryStatus};
 use crate::store::Store;
 use crate::summarize::{SummarizeError, Summarizer, SummaryInput, truncate_chars};
 
@@ -109,7 +109,7 @@ const PENDING_SCAN_LIMIT: usize = crate::MAX_SUMMARIES_PER_REFRESH * 3;
 /// 要約待ちの記事を、上限まで要約する。
 ///
 /// 上限（`MAX_SUMMARIES_PER_REFRESH`）に数えるのは、実際に AI を呼んだ件数だけ。
-/// 記事ごとの失敗（AI が断った、応答が読めない）はその記事だけ Failed にして続ける。
+/// 記事ごとの失敗（AI が断った、応答が読めない、要約が空）はその記事だけ Failed にして続ける。
 /// キーの問題・利用上限・通信の失敗はこの回の要約をやめ、記事は Pending のまま残す。
 async fn summarize_pending(
     store: &Mutex<Store>,
@@ -143,6 +143,9 @@ async fn summarize_pending(
         };
         calls += 1;
         match summarizer.summarize(&input).await {
+            Ok(summary) if is_blank(&summary) => {
+                let _ = lock(store).set_summary_status(article.id, SummaryStatus::Failed);
+            }
             Ok(summary) => {
                 if lock(store).save_summary(article.id, &summary).is_ok() {
                     report.summarized += 1;
@@ -157,6 +160,13 @@ async fn summarize_pending(
             }
         }
     }
+}
+
+/// どれかの項目が空（空白だけを含む）の要約。成功として保存しない
+fn is_blank(summary: &Summary) -> bool {
+    [&summary.title, &summary.one_line, &summary.detail]
+        .iter()
+        .any(|field| field.trim().is_empty())
 }
 
 /// 要約の材料にする本文を決める。

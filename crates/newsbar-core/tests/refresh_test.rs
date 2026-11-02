@@ -58,11 +58,20 @@ impl Summarizer for FakeSummarizer {
         if input.title.starts_with("refuse") {
             return Err(SummarizeError::Refused);
         }
-        Ok(Summary {
+        let mut summary = Summary {
             title: format!("要約: {}", input.title),
             one_line: "一言".into(),
             detail: "詳しい要約".into(),
-        })
+        };
+        // タイトルが "blank <項目名>" で始まる記事は、その項目を空白だけにして返す
+        if input.title.starts_with("blank title") {
+            summary.title = " \n".into();
+        } else if input.title.starts_with("blank one_line") {
+            summary.one_line = String::new();
+        } else if input.title.starts_with("blank detail") {
+            summary.detail = "  ".into();
+        }
+        Ok(summary)
     }
 }
 
@@ -449,6 +458,52 @@ async fn refused_marks_only_that_article_failed() {
             ("fine".to_string(), SummaryStatus::Done),
         ]
     );
+}
+
+#[tokio::test]
+async fn blank_summary_marks_only_that_article_failed() {
+    let body = long_body();
+    let (store, _) = store_with_pending(&[
+        ("blank title", &body),
+        ("blank one_line", &body),
+        ("blank detail", &body),
+        ("fine", &body),
+    ]);
+
+    let report = refresh(&store, &deps_with(FakeSummarizer::ok()), now()).await;
+
+    assert_eq!(report.summarized, 1);
+    assert_eq!(report.summary_error, None);
+    assert_eq!(
+        statuses(&store),
+        vec![
+            ("blank title".to_string(), SummaryStatus::Failed),
+            ("blank one_line".to_string(), SummaryStatus::Failed),
+            ("blank detail".to_string(), SummaryStatus::Failed),
+            ("fine".to_string(), SummaryStatus::Done),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn blank_summaries_count_toward_cap() {
+    let body = long_body();
+    let titles: Vec<String> = (0..35).map(|i| format!("blank detail {i}")).collect();
+    let pairs: Vec<(&str, &str)> = titles.iter().map(|t| (t.as_str(), body.as_str())).collect();
+    let (store, _) = store_with_pending(&pairs);
+    let fake = FakeSummarizer::ok();
+
+    refresh(&store, &deps_with(fake.clone()), now()).await;
+
+    assert_eq!(
+        fake.calls.lock().unwrap().len(),
+        newsbar_core::MAX_SUMMARIES_PER_REFRESH
+    );
+    let failed = statuses(&store)
+        .iter()
+        .filter(|(_, s)| *s == SummaryStatus::Failed)
+        .count();
+    assert_eq!(failed, newsbar_core::MAX_SUMMARIES_PER_REFRESH);
 }
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-{"id":"msg_test_not_json","type":"message","role":"assistant","model":"claude-haiku-5-5",
+{"id":"msg_test_no_tags","type":"message","role":"assistant","model":"claude-haiku-5-5",
  "content":[{"type":"text","text":"sorry"}],
  "stop_reason":"end_turn","stop_details":null,
  "usage":{"input_tokens":1200,"output_tokens":3}}

@@ -49,7 +49,7 @@ async fn summarize_ok_sends_expected_request() {
         .and(header("anthropic-version", "2026-10-21"))
         .and(body_partial_json(json!({
             "model": "claude-haiku-5-5",
-            "output_config": {"effort": "low", "format": {"type": "json_schema"}}
+            "output_config": {"effort": "low"}
         })))
         .respond_with(
             ResponseTemplate::new(200).set_body_raw(fixture("claude_ok.json"), "application/json"),
@@ -163,13 +163,135 @@ async fn max_tokens_is_invalid_response() {
 }
 
 #[tokio::test]
-async fn non_json_text_is_invalid_response() {
-    let server = respond_with(200, Some(fixture("claude_not_json.json"))).await;
+async fn text_without_tags_is_invalid_response() {
+    let server = respond_with(200, Some(fixture("claude_no_tags.json"))).await;
     let r = summarizer_for(&server).await.summarize(&input("ja")).await;
     assert!(
         matches!(r, Err(SummarizeError::InvalidResponse(_))),
         "got {r:?}"
     );
+}
+
+/// 送ったリクエストの本文（JSON）を1件だけ取り出す
+async fn sent_body(language: &str) -> serde_json::Value {
+    let server = respond_with(200, Some(fixture("claude_ok.json"))).await;
+    summarizer_for(&server)
+        .await
+        .summarize(&input(language))
+        .await
+        .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    serde_json::from_slice(&requests[0].body).unwrap()
+}
+
+#[tokio::test]
+async fn structured_output_is_not_requested() {
+    // 構造化出力（json_schema）は、要約が空文字で返ることがあるため使わない
+    let body = sent_body("ja").await;
+    assert_eq!(body["output_config"], json!({"effort": "low"}));
+}
+
+#[tokio::test]
+async fn system_prompt_asks_for_tagged_lines() {
+    let body = sent_body("ja").await;
+    let system = body["system"].as_str().unwrap();
+    assert!(
+        system.contains("<title>...</title>\n<one_line>...</one_line>\n<detail>...</detail>"),
+        "system: {system}"
+    );
+}
+
+#[tokio::test]
+async fn user_message_ends_with_language_reminder() {
+    for (language, reminder) in [
+        ("ja", "(Write every field in Japanese.)"),
+        ("en", "(Write every field in English.)"),
+    ] {
+        let body = sent_body(language).await;
+        let content = body["messages"][0]["content"].as_str().unwrap();
+        assert!(content.ends_with(reminder), "{language}: {content}");
+    }
+}
+
+/// text ブロックが `text` の、正常終了した応答で要約する
+async fn summarize_text(text: &str) -> Result<Summary, SummarizeError> {
+    let response = json!({
+        "id": "msg_test", "type": "message", "role": "assistant", "model": "claude-haiku-5-5",
+        "content": [{"type": "text", "text": text}],
+        "stop_reason": "end_turn", "stop_details": null,
+        "usage": {"input_tokens": 1200, "output_tokens": 80}
+    });
+    let server = respond_with(200, Some(response.to_string())).await;
+    summarizer_for(&server).await.summarize(&input("ja")).await
+}
+
+#[tokio::test]
+async fn tag_contents_are_trimmed_but_inner_newlines_kept() {
+    let s = summarize_text(
+        "<title>\n  T  \n</title>\n<one_line> O </one_line>\n<detail>\nD1\nD2\n</detail>",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        s,
+        Summary {
+            title: "T".into(),
+            one_line: "O".into(),
+            detail: "D1\nD2".into()
+        }
+    );
+}
+
+#[tokio::test]
+async fn text_around_tags_is_ignored() {
+    let s = summarize_text(
+        "Here is the summary:\n<title>T</title>\n<one_line>O</one_line>\n<detail>D</detail>\nDone.",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        s,
+        Summary {
+            title: "T".into(),
+            one_line: "O".into(),
+            detail: "D".into()
+        }
+    );
+}
+
+#[tokio::test]
+async fn missing_or_broken_tags_are_invalid_response() {
+    let cases = [
+        ("detail がない", "<title>T</title>\n<one_line>O</one_line>"),
+        (
+            "閉じタグがない",
+            "<title>T</title>\n<one_line>O</one_line>\n<detail>D",
+        ),
+    ];
+    for (name, text) in cases {
+        let r = summarize_text(text).await;
+        assert!(
+            matches!(r, Err(SummarizeError::InvalidResponse(_))),
+            "{name}: got {r:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn empty_tag_contents_are_invalid_response() {
+    let cases = [
+        "<title></title>\n<one_line>O</one_line>\n<detail>D</detail>",
+        "<title>T</title>\n<one_line> \n </one_line>\n<detail>D</detail>",
+        "<title>T</title>\n<one_line>O</one_line>\n<detail></detail>",
+    ];
+    for text in cases {
+        let r = summarize_text(text).await;
+        assert!(
+            matches!(r, Err(SummarizeError::InvalidResponse(_))),
+            "{text:?}: got {r:?}"
+        );
+    }
 }
 
 #[tokio::test]

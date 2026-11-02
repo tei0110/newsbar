@@ -93,7 +93,8 @@ function renderList(articles: Article[]) {
 
 function renderItem(a: Article): HTMLElement {
   const unread = !a.read_at;
-  const title = a.title ?? a.original_title;
+  // 空文字の要約タイトル（過去に保存されたもの）も、元のタイトルで代わりに出す
+  const title = a.title || a.original_title;
   const item = el("article", { class: `item${unread ? " unread" : ""}${a.id === expandedId ? " open" : ""}` }, [
     el("div", { class: "item-title" }, [
       el("span", { class: "dot", text: unread ? "●" : "○" }),
