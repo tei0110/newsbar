@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tokio::task::JoinSet;
 
-use crate::extract::fetch_article_text;
+use crate::extract::{ExtractError, fetch_article_text};
 use crate::feed::{FeedError, fetch_feed};
 use crate::ingest::ingest;
 use crate::model::{Article, FeedItem, Summary, SummaryStatus};
@@ -95,7 +95,7 @@ pub async fn refresh(
 
     match &deps.summarizer {
         Some(summarizer) => {
-            summarize_pending(store, deps, summarizer.as_ref(), &mut report).await;
+            summarize_pending(store, deps, summarizer.as_ref(), now, &mut report).await;
         }
         None => report.summary_error = Some(MISSING_KEY_MESSAGE.to_string()),
     }
@@ -111,10 +111,12 @@ const PENDING_SCAN_LIMIT: usize = crate::MAX_SUMMARIES_PER_REFRESH * 3;
 /// 上限（`MAX_SUMMARIES_PER_REFRESH`）に数えるのは、実際に AI を呼んだ件数だけ。
 /// 記事ごとの失敗（AI が断った、応答が読めない、要約が空）はその記事だけ Failed にして続ける。
 /// キーの問題・利用上限・通信の失敗はこの回の要約をやめ、記事は Pending のまま残す。
+/// 記事ページの取得が一時的に失敗した記事も、公開から 48 時間までは Pending のまま残して次の更新で試す。
 async fn summarize_pending(
     store: &Mutex<Store>,
     deps: &RefreshDeps,
     summarizer: &dyn Summarizer,
+    now: DateTime<Utc>,
     report: &mut RefreshReport,
 ) {
     let pending = match lock(store).pending_summaries(PENDING_SCAN_LIMIT) {
@@ -130,9 +132,13 @@ async fn summarize_pending(
         if calls >= crate::MAX_SUMMARIES_PER_REFRESH {
             break;
         }
-        let Some(body) = resolve_body(store, &deps.http, &article).await else {
-            let _ = lock(store).set_summary_status(article.id, SummaryStatus::Skipped);
-            continue;
+        let body = match resolve_body(store, &deps.http, &article, now).await {
+            Body::Text(body) => body,
+            Body::Retry => continue, // Pending のまま、次の更新でもう一度取りに行く
+            Body::Skip => {
+                let _ = lock(store).set_summary_status(article.id, SummaryStatus::Skipped);
+                continue;
+            }
         };
         let input = SummaryInput {
             title: article.original_title.clone(),
@@ -179,16 +185,45 @@ async fn resolve_body(
     store: &Mutex<Store>,
     http: &reqwest::Client,
     article: &Article,
-) -> Option<String> {
+    now: DateTime<Utc>,
+) -> Body {
     let feed_text = article.body_text.clone().unwrap_or_default();
     if feed_text.chars().count() >= crate::ENOUGH_FEED_TEXT_CHARS {
-        return Some(feed_text);
+        return Body::Text(feed_text);
     }
-    if let Ok(Some(page_text)) = fetch_article_text(http, &article.url).await {
-        let _ = lock(store).set_body_text(article.id, &page_text);
-        return Some(page_text);
+    match fetch_article_text(http, &article.url).await {
+        Ok(Some(page_text)) => {
+            let _ = lock(store).set_body_text(article.id, &page_text);
+            Body::Text(page_text)
+        }
+        Err(e) if is_transient(&e) && within_retry_window(article, now) => Body::Retry,
+        _ => Body::Skip,
     }
-    None
+}
+
+/// 要約の材料を決めた結果
+enum Body {
+    /// この本文で要約する
+    Text(String),
+    /// 記事ページの取得に一時的に失敗した。Pending のまま、次の更新でもう一度試す
+    Retry,
+    /// 本文が取れない（取れる見込みもない）ので要約しない
+    Skip,
+}
+
+/// もう一度試せば取れるかもしれない失敗か（通信エラー・サーバーの不調・アクセスしすぎ）。
+/// 403 や 404 などはサイト側の判断なので、何度試しても変わらない
+fn is_transient(e: &ExtractError) -> bool {
+    match e {
+        ExtractError::Network(_) => true,
+        ExtractError::Status(code) => *code == 429 || (500..=599).contains(code),
+        ExtractError::TooLarge => false,
+    }
+}
+
+/// 公開から `NEW_ITEM_WINDOW_HOURS` 以内か。取れないページをいつまでも取りに行き続けないための区切り
+fn within_retry_window(article: &Article, now: DateTime<Utc>) -> bool {
+    now - article.published_at < chrono::Duration::hours(crate::NEW_ITEM_WINDOW_HOURS)
 }
 
 /// 情報源として追加する前に、フィードとして読めるか確かめる。読めた記事数か、日本語の理由を返す。

@@ -385,6 +385,152 @@ async fn unreachable_article_with_short_feed_text_is_skipped() {
     assert_eq!(statuses(&store)[0].1, SummaryStatus::Skipped);
 }
 
+/// どのパスにも、決まったステータスだけを返すサーバー
+async fn status_server(status: u16) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(status))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// つながらない URL（記事ページの取得が通信エラーになる）
+const UNREACHABLE: &str = "http://127.0.0.1:9";
+
+/// 公開日時を指定して、フィードの本文が短い要約待ちの記事を1件入れる
+fn store_with_short_article(url: &str, published_at: DateTime<Utc>) -> Mutex<Store> {
+    let store = Store::open_in_memory().unwrap();
+    let src = store
+        .add_source("A", "http://127.0.0.1:9/feed", "AI", true)
+        .unwrap();
+    store
+        .insert_article(&NewArticle {
+            source_id: src.id,
+            url: url.to_string(),
+            original_title: "short".to_string(),
+            published_at,
+            fetched_at: now(),
+            body_text: Some("短い概要".to_string()),
+        })
+        .unwrap();
+    Mutex::new(store)
+}
+
+#[tokio::test]
+async fn network_error_keeps_article_pending() {
+    // 通信エラーは一時的なことが多いので、次の更新でもう一度取りに行く
+    let store = store_with_short_article(&format!("{UNREACHABLE}/a"), now() - Duration::hours(1));
+    let fake = FakeSummarizer::ok();
+
+    let report = refresh(&store, &deps_with(fake.clone()), now()).await;
+
+    assert_eq!(report.summarized, 0);
+    assert!(fake.calls.lock().unwrap().is_empty());
+    assert_eq!(statuses(&store)[0].1, SummaryStatus::Pending);
+}
+
+#[tokio::test]
+async fn server_error_and_rate_limit_keep_article_pending() {
+    for status in [503, 429] {
+        let server = status_server(status).await;
+        let (store, _) = store_with_pending_at(&server.uri(), &[("short", "短い概要")]);
+
+        refresh(&store, &deps_with(FakeSummarizer::ok()), now()).await;
+
+        assert_eq!(
+            statuses(&store)[0].1,
+            SummaryStatus::Pending,
+            "HTTP {status}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn forbidden_page_is_skipped() {
+    // 403 などはサイト側が拒否しているので、何度試しても変わらない
+    let server = status_server(403).await;
+    let (store, _) = store_with_pending_at(&server.uri(), &[("short", "短い概要")]);
+
+    refresh(&store, &deps_with(FakeSummarizer::ok()), now()).await;
+
+    assert_eq!(statuses(&store)[0].1, SummaryStatus::Skipped);
+}
+
+#[tokio::test]
+async fn network_error_after_window_is_skipped() {
+    // 公開から 48 時間を過ぎたら、いつまでも取りに行き続けない
+    let published = now() - Duration::hours(newsbar_core::NEW_ITEM_WINDOW_HOURS + 1);
+    let store = store_with_short_article(&format!("{UNREACHABLE}/a"), published);
+
+    refresh(&store, &deps_with(FakeSummarizer::ok()), now()).await;
+
+    assert_eq!(statuses(&store)[0].1, SummaryStatus::Skipped);
+}
+
+#[tokio::test]
+async fn pending_article_is_summarized_when_page_comes_back() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/0"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/0"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(fixture("article.html"), "text/html; charset=utf-8"),
+        )
+        .mount(&server)
+        .await;
+    let (store, _) = store_with_pending_at(&server.uri(), &[("short", "短い概要")]);
+    let deps = deps_with(FakeSummarizer::ok());
+
+    refresh(&store, &deps, now()).await;
+    assert_eq!(statuses(&store)[0].1, SummaryStatus::Pending, "1回目は 503");
+
+    let report = refresh(&store, &deps, now()).await;
+    assert_eq!(report.summarized, 1);
+    assert_eq!(
+        statuses(&store)[0].1,
+        SummaryStatus::Done,
+        "2回目で要約される"
+    );
+}
+
+#[tokio::test]
+async fn pending_retries_do_not_count_toward_cap() {
+    // 新しい10件は記事ページにつながらない（Pending に残す）、古い30件は本文が十分にある
+    let body = long_body();
+    let titles: Vec<String> = (0..40).map(|i| format!("t{i}")).collect();
+    let pairs: Vec<(&str, &str)> = titles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            (
+                t.as_str(),
+                if i < 10 {
+                    "短い概要"
+                } else {
+                    body.as_str()
+                },
+            )
+        })
+        .collect();
+    let (store, _) = store_with_pending_at(UNREACHABLE, &pairs);
+
+    let report = refresh(&store, &deps_with(FakeSummarizer::ok()), now()).await;
+
+    assert_eq!(report.summarized, newsbar_core::MAX_SUMMARIES_PER_REFRESH);
+    let pending = statuses(&store)
+        .iter()
+        .filter(|(_, s)| *s == SummaryStatus::Pending)
+        .count();
+    assert_eq!(pending, 10);
+}
+
 #[tokio::test]
 async fn no_text_anywhere_is_skipped() {
     let server = article_server(&[("/0", None)]).await;
