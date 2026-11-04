@@ -33,6 +33,8 @@ pub struct RefreshReport {
     /// (情報源の id, 理由)
     pub feed_errors: Vec<(i64, String)>,
     pub summary_error: Option<String>,
+    /// 有効な情報源が1つ以上あり、そのすべてにつながらなかった（オフラインやスリープ明け直後）
+    pub offline: bool,
 }
 
 /// 有効な情報源をすべて取得して取り込む。
@@ -70,6 +72,11 @@ pub async fn refresh(
             fetched.push(pair);
         }
     }
+
+    report.offline = !fetched.is_empty()
+        && fetched
+            .iter()
+            .all(|(_, result)| matches!(result, Err(FeedError::Network(_))));
 
     {
         let store = lock(store);

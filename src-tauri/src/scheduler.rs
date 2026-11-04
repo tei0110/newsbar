@@ -28,7 +28,7 @@ pub fn spawn(app: AppHandle) {
             loop {
                 tokio::select! {
                     _ = tokio::time::sleep(CHECK_INTERVAL) => {
-                        if refresh_is_due(&app) {
+                        if should_auto_refresh(refresh_is_due(&app), display_asleep()) {
                             break;
                         }
                     }
@@ -50,6 +50,43 @@ pub fn is_due(
 ) -> bool {
     last_refreshed_at
         .is_none_or(|last| now - last >= chrono::Duration::minutes(i64::from(interval_minutes)))
+}
+
+/// 自動更新（1分ごとの確認）で、今更新を始めるか。
+///
+/// 画面がスリープしている間は始めない。Power Nap などで Mac が数秒だけ起きる間（DarkWake）にも
+/// 確認が走り、通信の途中で眠ってしまうため。画面がついたら、次の確認で更新する。
+pub fn should_auto_refresh(due: bool, display_asleep: bool) -> bool {
+    due && !display_asleep
+}
+
+/// 更新が終わったあとの「最終更新」の時刻。
+///
+/// オフラインだった更新（どの情報源にもつながらなかった）は更新したことにしない。
+/// 前回の時刻のままにしておけば期限切れのままなので、1分後の確認でもう一度試す。
+pub fn last_refreshed_after(
+    previous: Option<DateTime<Utc>>,
+    offline: bool,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    if offline { previous } else { Some(now) }
+}
+
+/// メインの画面がスリープしているか（DarkWake の間や、画面が消えているとき）
+#[cfg(target_os = "macos")]
+fn display_asleep() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGMainDisplayID() -> u32;
+        fn CGDisplayIsAsleep(display: u32) -> u32;
+    }
+    // SAFETY: どちらも引数・戻り値が整数だけの、副作用のない問い合わせ
+    unsafe { CGDisplayIsAsleep(CGMainDisplayID()) != 0 }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn display_asleep() -> bool {
+    false
 }
 
 /// 今すぐ更新すべきか（設定の間隔と、前回の更新時刻から判断する）。更新中なら false
@@ -86,7 +123,8 @@ pub async fn run_refresh(app: &AppHandle) -> Option<RefreshReport> {
     let report = refresh(&state.store, &deps, Utc::now()).await;
 
     if let Ok(mut status) = state.status.lock() {
-        status.last_refreshed_at = Some(Utc::now());
+        status.last_refreshed_at =
+            last_refreshed_after(status.last_refreshed_at, report.offline, Utc::now());
         status.feed_error_count = report.feed_errors.len();
         status.summary_error = report.summary_error.clone();
     }
@@ -144,6 +182,28 @@ mod tests {
         let last = Some(at(7, 0));
         assert!(!is_due(last, 60, at(7, 59)));
         assert!(is_due(last, 60, at(8, 0)));
+    }
+
+    #[test]
+    fn no_auto_refresh_while_display_is_asleep() {
+        assert!(!should_auto_refresh(true, true));
+        assert!(should_auto_refresh(true, false));
+        assert!(!should_auto_refresh(false, false));
+    }
+
+    #[test]
+    fn offline_refresh_keeps_previous_time() {
+        let previous = Some(at(7, 0));
+        assert_eq!(last_refreshed_after(previous, true, at(8, 0)), previous);
+        assert_eq!(last_refreshed_after(None, true, at(8, 0)), None);
+    }
+
+    #[test]
+    fn online_refresh_records_now() {
+        assert_eq!(
+            last_refreshed_after(Some(at(7, 0)), false, at(8, 0)),
+            Some(at(8, 0))
+        );
     }
 
     #[test]

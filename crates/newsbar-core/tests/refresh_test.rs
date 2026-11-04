@@ -176,6 +176,40 @@ async fn disabled_sources_are_not_fetched() {
 }
 
 #[tokio::test]
+async fn all_feeds_unreachable_is_offline() {
+    let store = Store::open_in_memory().unwrap();
+    for name in ["A", "B"] {
+        store
+            .add_source(name, &format!("http://127.0.0.1:9/{name}"), "AI", true)
+            .unwrap();
+    }
+    let report = refresh(&Mutex::new(store), &deps(), now()).await;
+    assert!(report.offline);
+}
+
+#[tokio::test]
+async fn reachable_feed_or_http_error_is_not_offline() {
+    // 1つでもサーバーまで届いていれば（HTTP エラーでも）オフラインではない
+    let server = status_server(500).await;
+    let store = Store::open_in_memory().unwrap();
+    store
+        .add_source("A", "http://127.0.0.1:9/feed", "AI", true)
+        .unwrap();
+    store
+        .add_source("B", &format!("{}/feed", server.uri()), "AI", true)
+        .unwrap();
+    let report = refresh(&Mutex::new(store), &deps(), now()).await;
+    assert!(!report.offline);
+}
+
+#[tokio::test]
+async fn no_enabled_sources_is_not_offline() {
+    let store = Store::open_in_memory().unwrap();
+    let report = refresh(&Mutex::new(store), &deps(), now()).await;
+    assert!(!report.offline);
+}
+
+#[tokio::test]
 async fn offline_refresh_keeps_existing_articles() {
     let store = Store::open_in_memory().unwrap();
     let src = store
