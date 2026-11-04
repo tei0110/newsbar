@@ -279,6 +279,26 @@ async fn missing_or_broken_tags_are_invalid_response() {
 }
 
 #[tokio::test]
+async fn system_prompt_asks_to_flag_non_articles() {
+    let body = sent_body("ja").await;
+    let system = body["system"].as_str().unwrap();
+    assert!(system.contains("<unavailable/>"), "system: {system}");
+}
+
+#[tokio::test]
+async fn unavailable_marker_is_not_article() {
+    // アクセス制限ページや CAPTCHA など、記事ではない文章を渡したとき
+    for text in [
+        "<unavailable/>",
+        "\n<unavailable/>\n",
+        "Not an article.\n<unavailable/>",
+    ] {
+        let r = summarize_text(text).await;
+        assert_eq!(r, Err(SummarizeError::NotArticle), "{text:?}");
+    }
+}
+
+#[tokio::test]
 async fn empty_tag_contents_are_invalid_response() {
     let cases = [
         "<title></title>\n<one_line>O</one_line>\n<detail>D</detail>",

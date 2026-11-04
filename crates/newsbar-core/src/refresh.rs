@@ -167,6 +167,10 @@ async fn summarize_pending(
             Err(SummarizeError::Refused | SummarizeError::InvalidResponse(_)) => {
                 let _ = lock(store).set_summary_status(article.id, SummaryStatus::Failed);
             }
+            // 本文だと思ったものがアクセス制限ページなどだった。本文が取れなかった記事と同じ扱い
+            Err(SummarizeError::NotArticle) => {
+                let _ = lock(store).set_summary_status(article.id, SummaryStatus::Skipped);
+            }
             Err(e) => {
                 report.summary_error = Some(e.to_string());
                 break;

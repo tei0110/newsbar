@@ -31,6 +31,8 @@ pub enum SummarizeError {
     RateLimited,
     #[error("この記事は要約できませんでした")]
     Refused,
+    #[error("記事の本文ではありませんでした（アクセス制限のページなど）")]
+    NotArticle,
     #[error("APIエラー（HTTP {0}）: {1}")]
     Http(u16, String),
     #[error("AIの応答を読み取れませんでした: {0}")]

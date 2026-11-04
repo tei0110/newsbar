@@ -58,6 +58,9 @@ impl Summarizer for FakeSummarizer {
         if input.title.starts_with("refuse") {
             return Err(SummarizeError::Refused);
         }
+        if input.title.starts_with("not article") {
+            return Err(SummarizeError::NotArticle);
+        }
         let mut summary = Summary {
             title: format!("要約: {}", input.title),
             one_line: "一言".into(),
@@ -639,6 +642,27 @@ async fn refused_marks_only_that_article_failed() {
         statuses(&store),
         vec![
             ("refuse me".to_string(), SummaryStatus::Failed),
+            ("fine".to_string(), SummaryStatus::Done),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn not_article_is_skipped_and_others_continue() {
+    // 記事ページの代わりにアクセス制限ページなどが返っていたら、要約せずにタイトルとリンクだけにする
+    let body = long_body();
+    let (store, _) = store_with_pending(&[("not article", &body), ("fine", &body)]);
+    let fake = FakeSummarizer::ok();
+
+    let report = refresh(&store, &deps_with(fake.clone()), now()).await;
+
+    assert_eq!(report.summarized, 1);
+    assert_eq!(report.summary_error, None);
+    assert_eq!(fake.calls.lock().unwrap().len(), 2);
+    assert_eq!(
+        statuses(&store),
+        vec![
+            ("not article".to_string(), SummaryStatus::Skipped),
             ("fine".to_string(), SummaryStatus::Done),
         ]
     );

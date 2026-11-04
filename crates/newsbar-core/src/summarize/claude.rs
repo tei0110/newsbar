@@ -24,6 +24,7 @@
 //! - `stop_reason` が `"refusal"` → `Refused`、`"max_tokens"` → `InvalidResponse("max_tokens")`
 //! - `content` 配列から `"type": "text"` のブロックを探し、その `text` から 3 つのタグの中身を取り出す。
 //!   タグが無い・閉じていない・中身が空なら `InvalidResponse`。`"type": "thinking"` のブロックは無視する
+//! - 渡した文章が記事ではない（アクセス制限ページ・CAPTCHA など）と判断されると `<unavailable/>` が返る → `NotArticle`
 //! - 送信自体の失敗（つながらない等）→ `Network`
 
 use serde_json::json;
@@ -34,6 +35,9 @@ use crate::model::Summary;
 pub const DEFAULT_MODEL: &str = "claude-haiku-5-5";
 pub const API_BASE: &str = "https://api.anthropic.com";
 pub const API_VERSION: &str = "2026-10-21";
+
+/// 渡した文章が記事ではないときに返してもらう目印
+const UNAVAILABLE: &str = "<unavailable/>";
 
 /// システムプロンプト（`{LANG}` を置き換えて使う）
 pub const SYSTEM_PROMPT: &str = "\
@@ -48,7 +52,9 @@ Fields:
 Return exactly three lines and nothing else:
 <title>...</title>
 <one_line>...</one_line>
-<detail>...</detail>";
+<detail>...</detail>
+If the text is not the article itself (for example an access-denied page, a CAPTCHA or bot check, \
+a login or paywall notice, or a cookie banner), return only <unavailable/> instead.";
 
 /// Claude で要約する
 pub struct ClaudeSummarizer {
@@ -161,6 +167,10 @@ impl Summarizer for ClaudeSummarizer {
 /// `<title>…</title>` `<one_line>…</one_line>` `<detail>…</detail>` の中身を取り出す。
 /// どれかが無い・閉じていない・中身が空なら `InvalidResponse`。
 fn parse_tagged(text: &str) -> Result<Summary, SummarizeError> {
+    // 記事ページの代わりにアクセス制限ページなどが渡っていた（Claude がそう判断した）
+    if text.contains(UNAVAILABLE) {
+        return Err(SummarizeError::NotArticle);
+    }
     Ok(Summary {
         title: tag_content(text, "title")?,
         one_line: tag_content(text, "one_line")?,
