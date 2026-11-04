@@ -92,9 +92,105 @@ pub fn save_settings(store: &Store, settings: &SettingsDto) -> Result<(), String
     save(KEY_LANGUAGE, &settings.language)
 }
 
+const KEY_READER_GEOMETRY: &str = "reader_geometry";
+/// 「広げて読む」画面の最小の大きさ（見た目の大きさ）
+pub const READER_MIN_SIZE: (f64, f64) = (720.0, 460.0);
+
+/// ウィンドウの位置と大きさ。画面の画素密度に左右されない「見た目の大きさ」（論理ピクセル）で持つ。
+/// 実際の画素数（物理ピクセル）で持つと、Retina と等倍の外部ディスプレイを行き来したときに
+/// 大きさが半分・倍にずれるため。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Geometry {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// 保存してある「広げて読む」画面の位置と大きさ。未保存や壊れた値なら `None`
+pub fn load_reader_geometry(store: &Store) -> Option<Geometry> {
+    let json = store.get_setting(KEY_READER_GEOMETRY).ok().flatten()?;
+    serde_json::from_str(&json).ok()
+}
+
+/// 「広げて読む」画面の位置と大きさを保存する
+pub fn save_reader_geometry(store: &Store, geometry: &Geometry) -> Result<(), String> {
+    let json = serde_json::to_string(geometry).map_err(|e| e.to_string())?;
+    store
+        .set_setting(KEY_READER_GEOMETRY, &json)
+        .map_err(|e| format!("画面の大きさを保存できませんでした: {e}"))
+}
+
+/// 保存してある位置と大きさを、そのまま使ってよい形に直す。
+///
+/// - 大きさが最小より小さければ最小まで広げる
+/// - 左上がどの画面（`screens`、見た目の大きさ）にも入っていなければ、位置は使わない（`None`、中央に開く）
+pub fn usable_geometry(saved: Geometry, screens: &[Geometry]) -> (f64, f64, Option<(f64, f64)>) {
+    let width = saved.width.max(READER_MIN_SIZE.0);
+    let height = saved.height.max(READER_MIN_SIZE.1);
+    let on_screen = screens.iter().any(|s| {
+        saved.x >= s.x && saved.x < s.x + s.width && saved.y >= s.y && saved.y < s.y + s.height
+    });
+    (width, height, on_screen.then_some((saved.x, saved.y)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn geometry(x: f64, y: f64, width: f64, height: f64) -> Geometry {
+        Geometry {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn reader_geometry_round_trips() {
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(load_reader_geometry(&store), None);
+        let g = geometry(120.0, 80.0, 1040.0, 720.0);
+        save_reader_geometry(&store, &g).unwrap();
+        assert_eq!(load_reader_geometry(&store), Some(g));
+    }
+
+    #[test]
+    fn broken_reader_geometry_is_ignored() {
+        let store = Store::open_in_memory().unwrap();
+        store.set_setting(KEY_READER_GEOMETRY, "not json").unwrap();
+        assert_eq!(load_reader_geometry(&store), None);
+    }
+
+    #[test]
+    fn too_small_size_is_raised_to_minimum() {
+        let screens = [geometry(0.0, 0.0, 1440.0, 900.0)];
+        let (w, h, _) = usable_geometry(geometry(100.0, 100.0, 300.0, 200.0), &screens);
+        assert_eq!((w, h), READER_MIN_SIZE);
+    }
+
+    #[test]
+    fn position_on_a_screen_is_kept() {
+        // 内蔵ディスプレイの右に外部ディスプレイがある
+        let screens = [
+            geometry(0.0, 0.0, 1440.0, 900.0),
+            geometry(1440.0, 0.0, 3440.0, 1440.0),
+        ];
+        let saved = geometry(2000.0, 300.0, 1040.0, 720.0);
+        assert_eq!(
+            usable_geometry(saved, &screens),
+            (1040.0, 720.0, Some((2000.0, 300.0)))
+        );
+    }
+
+    #[test]
+    fn position_off_every_screen_is_dropped() {
+        // 外部ディスプレイを外したあと、そこにあった位置は使わない
+        let screens = [geometry(0.0, 0.0, 1440.0, 900.0)];
+        let saved = geometry(2000.0, 300.0, 1040.0, 720.0);
+        assert_eq!(usable_geometry(saved, &screens), (1040.0, 720.0, None));
+    }
 
     fn settings(interval: u32, model: &str, language: &str) -> SettingsDto {
         SettingsDto {

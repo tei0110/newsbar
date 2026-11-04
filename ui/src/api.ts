@@ -85,6 +85,7 @@ export const hasApiKey = () => invoke<boolean>("has_api_key");
 export const getAutostart = () => invoke<boolean>("get_autostart");
 export const setAutostart = (enabled: boolean) => invoke<void>("set_autostart", { enabled });
 export const openSettings = () => invoke<void>("open_settings");
+export const openReader = () => invoke<void>("open_reader");
 
 /** 小さな DOM 組み立て用の関数。文字列は必ず textContent で入れる（フィード由来の文字列を HTML として扱わない） */
 export function el<K extends keyof HTMLElementTagNameMap>(

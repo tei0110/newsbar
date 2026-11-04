@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "小窓と設定画面に必要な権限",
+  "description": "小窓・設定画面・広げて読む画面に必要な権限",
   "windows": [
     "popover",
-    "settings"
+    "settings",
+    "reader"
   ],
   "permissions": [
     "core:default",

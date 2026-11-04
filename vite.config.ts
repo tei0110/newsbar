@@ -13,6 +13,7 @@ export default defineConfig({
       input: {
         popover: resolve(import.meta.dirname, "ui/popover.html"),
         settings: resolve(import.meta.dirname, "ui/settings.html"),
+        reader: resolve(import.meta.dirname, "ui/reader.html"),
       },
     },
   },

@@ -247,6 +247,11 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn open_reader(app: AppHandle) -> Result<(), String> {
+    tray::open_reader(&app).map_err(|e| format!("広い画面を開けませんでした: {e}"))
+}
+
+#[tauri::command]
 pub fn open_settings(app: AppHandle) -> Result<(), String> {
     tray::open_settings(&app).map_err(|e| format!("設定画面を開けませんでした: {e}"))
 }

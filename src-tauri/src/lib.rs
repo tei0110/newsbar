@@ -43,6 +43,7 @@ pub fn run() {
             commands::get_autostart,
             commands::set_autostart,
             commands::open_settings,
+            commands::open_reader,
         ])
         .setup(|app| {
             // Dock にアイコンを出さない（メニューバー常駐アプリ）
