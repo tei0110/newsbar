@@ -8,6 +8,7 @@ import {
   listArticles,
   markAllRead,
   markRead,
+  openSettings,
   openUrl,
   refreshNow,
   unreadCounts,
@@ -134,6 +135,7 @@ document.addEventListener("keydown", (e) => {
 $("refresh").addEventListener("click", () => {
   void refreshNow().catch(() => undefined);
 });
+$("settings").addEventListener("click", () => void openSettings());
 $("mark-all").addEventListener("click", async () => {
   await markAllRead(currentLabel);
   await render();
