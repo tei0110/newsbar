@@ -38,5 +38,16 @@ rm -rf "$INSTALLED"
 ditto "$BUILT" "$INSTALLED"
 
 echo "==> 起動しています"
-open "$INSTALLED"
+# 終了した直後は macOS 側がまだ古いプロセスがあると思っていて、open が -600 で失敗することがある。
+# 少し待って、最大3回まで試す
+for attempt in 1 2 3; do
+  if open "$INSTALLED" 2>/dev/null; then
+    break
+  fi
+  if [ "$attempt" -eq 3 ]; then
+    echo "エラー: 起動できませんでした。open \"$INSTALLED\" を手で実行してください" >&2
+    exit 1
+  fi
+  sleep 1
+done
 echo "完了しました。キーチェーンの確認が出たら「常に許可」を選んでください"
