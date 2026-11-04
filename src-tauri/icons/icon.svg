@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- newsbar のアプリアイコンの元絵（1024×1024）。
+     藍色の角丸に、メニューバーのアイコン（tray.png）と同じ形の新聞を白抜き、写真の部分だけ黄色。
+     各サイズは npx tauri icon でこのファイルから作り（出力先は -o で一時フォルダに）、
+     icons/ に元からあるファイルだけを置き換える。tray.png はメニューバー用で別物。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="indigo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a7cff"/>
+      <stop offset="1" stop-color="#3d32c9"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS のアイコンの枠（1024 の中に 824 の角丸） -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#indigo)"/>
+  <!-- 新聞（中心 512,512 を基準に 1.25 倍） -->
+  <g transform="translate(512 512) scale(1.25)">
+    <rect x="-200" y="-150" width="400" height="300" rx="28" fill="none" stroke="#ffffff" stroke-width="40"/>
+    <rect x="-140" y="-95" width="130" height="95" rx="10" fill="#ffd34d"/>
+    <rect x="20" y="-95" width="120" height="30" rx="12" fill="#ffffff"/>
+    <rect x="20" y="-30" width="120" height="30" rx="12" fill="#ffffff"/>
+    <rect x="-140" y="40" width="280" height="30" rx="12" fill="#ffffff"/>
+  </g>
+</svg>
