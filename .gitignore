@@ -3,3 +3,5 @@ tmp/
 target/
 node_modules/
 dist/
+# セッションの引き継ぎ資料（ローカルの作業メモ。公開しない）
+claudedocs/

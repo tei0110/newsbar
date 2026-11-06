@@ -3,6 +3,7 @@ name = "newsbar"
 description = "AI・セキュリティの新着をメニューバーで読むアプリ"
 edition.workspace = true
 version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [lib]
