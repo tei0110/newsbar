@@ -32,6 +32,9 @@ pub struct RefreshReport {
     pub summarized: usize,
     /// (情報源の id, 理由)
     pub feed_errors: Vec<(i64, String)>,
+    /// 画面の帯で知らせる取得の失敗 (情報源の id, 理由)。`feed_errors` のうち、
+    /// 一時的でない失敗と、一時的な失敗が2回続いたもの
+    pub feed_alerts: Vec<(i64, String)>,
     pub summary_error: Option<String>,
     /// 有効な情報源が1つ以上あり、そのすべてにつながらなかった（オフラインやスリープ明け直後）
     pub offline: bool,
@@ -81,24 +84,45 @@ pub async fn refresh(
     {
         let store = lock(store);
         for (source, result) in fetched {
-            match result {
+            // 一時的な失敗が2回続いたかを見るため、今回の結果を残す前に前回の結果を読む
+            let previous_failed = store
+                .recent_fetches(source.id, 1)
+                .ok()
+                .and_then(|log| log.into_iter().next())
+                .is_some_and(|entry| entry.error.is_some());
+            let failure = match result {
                 Ok(items) => {
                     let _ = store.record_fetch(source.id, now, None);
-                    match ingest(&store, &source, &items, now) {
-                        Ok(r) => report.new_articles += r.inserted,
-                        Err(e) => report.feed_errors.push((source.id, e.to_string())),
-                    }
+                    ingest(&store, &source, &items, now)
+                        .map(|r| report.new_articles += r.inserted)
+                        .err()
+                        .map(|e| (e.to_string(), false))
                 }
                 Err(e) => {
                     let message = e.to_string();
                     let _ = store.record_fetch(source.id, now, Some(&message));
-                    report.feed_errors.push((source.id, message));
+                    Some((message, is_transient_feed_error(&e)))
                 }
+            };
+            // 全部につながらなかった回は情報源のせいではないので、履歴にも帯にも出さない
+            if !report.offline {
+                let (error, transient) = match &failure {
+                    Some((message, transient)) => (Some(message.as_str()), *transient),
+                    None => (None, false),
+                };
+                let _ = store.log_fetch(source.id, now, error, transient);
+            }
+            if let Some((message, transient)) = failure {
+                if !report.offline && (!transient || previous_failed) {
+                    report.feed_alerts.push((source.id, message.clone()));
+                }
+                report.feed_errors.push((source.id, message));
             }
         }
         let _ = store.purge(now);
     }
     report.feed_errors.sort();
+    report.feed_alerts.sort();
 
     match &deps.summarizer {
         Some(summarizer) => {
@@ -229,6 +253,16 @@ fn is_transient(e: &ExtractError) -> bool {
         ExtractError::Network(_) => true,
         ExtractError::Status(code) => *code == 429 || (500..=599).contains(code),
         ExtractError::TooLarge => false,
+    }
+}
+
+/// フィードの取得の失敗のうち、もう一度試せば取れるかもしれないもの（通信エラー・サーバーの不調・
+/// アクセスしすぎ）。配信元がときどき 502 を返すだけで毎回知らせないよう、2回続くまで帯に出さない
+fn is_transient_feed_error(e: &FeedError) -> bool {
+    match e {
+        FeedError::Network(_) => true,
+        FeedError::Status(code) => *code == 429 || (500..=599).contains(code),
+        FeedError::TooLarge | FeedError::Parse(_) => false,
     }
 }
 

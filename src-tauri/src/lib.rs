@@ -31,6 +31,7 @@ pub fn run() {
             commands::refresh_now,
             commands::get_status,
             commands::list_sources,
+            commands::fetch_stats,
             commands::add_source,
             commands::delete_source,
             commands::set_source_enabled,

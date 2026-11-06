@@ -17,6 +17,25 @@ pub struct Source {
     pub last_error: Option<String>,
 }
 
+/// 情報源を1回取得した結果（取得の履歴の1行）
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FetchLogEntry {
+    pub at: DateTime<Utc>,
+    /// 失敗したときの理由。成功なら `None`
+    pub error: Option<String>,
+    /// もう一度試せば取れるかもしれない失敗か（通信エラー・5xx・429）
+    pub transient: bool,
+}
+
+/// ある時点からの取得の集計（設定画面に出す）
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct FetchStats {
+    pub total: usize,
+    pub failures: usize,
+    pub last_failure_at: Option<DateTime<Utc>>,
+    pub last_failure_error: Option<String>,
+}
+
 /// フィードから読み取った1件分の記事
 #[derive(Debug, Clone, PartialEq)]
 pub struct FeedItem {

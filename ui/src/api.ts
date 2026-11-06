@@ -42,6 +42,15 @@ export interface Source {
   last_error: string | null;
 }
 
+/** 情報源ごとの取得の集計（直近7日） */
+export interface FetchStats {
+  source_id: number;
+  total: number;
+  failures: number;
+  last_failure_at: string | null;
+  last_failure_error: string | null;
+}
+
 export interface Recommended {
   name: string;
   feed_url: string;
@@ -71,6 +80,7 @@ export const openUrl = (url: string) => invoke<void>("open_url", { url });
 export const refreshNow = () => invoke<RefreshReport>("refresh_now");
 export const getStatus = () => invoke<AppStatus>("get_status");
 export const listSources = () => invoke<Source[]>("list_sources");
+export const fetchStats = () => invoke<FetchStats[]>("fetch_stats");
 export const addSource = (name: string, feedUrl: string, label: string) =>
   invoke<Source>("add_source", { name, feedUrl, label });
 export const deleteSource = (id: number) => invoke<void>("delete_source", { id });

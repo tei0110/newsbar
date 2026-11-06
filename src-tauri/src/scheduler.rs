@@ -10,7 +10,7 @@ use newsbar_core::summarize::Summarizer;
 use newsbar_core::summarize::claude::ClaudeSummarizer;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::state::{AppState, load_settings};
+use crate::state::{AppState, AppStatus, load_settings};
 use crate::{secrets, tray};
 
 pub const ARTICLES_UPDATED: &str = "articles-updated";
@@ -72,6 +72,16 @@ pub fn last_refreshed_after(
     if offline { previous } else { Some(now) }
 }
 
+/// 更新の結果を画面に出す状態に反映する。
+///
+/// 帯に数えるのは `feed_alerts`（一時的でない失敗と、一時的な失敗が2回続いたもの）だけ。
+/// 1回だけの 502 などは設定画面の「取得できませんでした」にだけ出る。
+pub fn apply_report(status: &mut AppStatus, report: &RefreshReport, now: DateTime<Utc>) {
+    status.last_refreshed_at = last_refreshed_after(status.last_refreshed_at, report.offline, now);
+    status.feed_error_count = report.feed_alerts.len();
+    status.summary_error = report.summary_error.clone();
+}
+
 /// メインの画面がスリープしているか（DarkWake の間や、画面が消えているとき）
 #[cfg(target_os = "macos")]
 fn display_asleep() -> bool {
@@ -123,10 +133,7 @@ pub async fn run_refresh(app: &AppHandle) -> Option<RefreshReport> {
     let report = refresh(&state.store, &deps, Utc::now()).await;
 
     if let Ok(mut status) = state.status.lock() {
-        status.last_refreshed_at =
-            last_refreshed_after(status.last_refreshed_at, report.offline, Utc::now());
-        status.feed_error_count = report.feed_errors.len();
-        status.summary_error = report.summary_error.clone();
+        apply_report(&mut status, &report, Utc::now());
     }
     state.refreshing.store(false, Ordering::SeqCst);
     set_refreshing(app, false);
@@ -204,6 +211,25 @@ mod tests {
             last_refreshed_after(Some(at(7, 0)), false, at(8, 0)),
             Some(at(8, 0))
         );
+    }
+
+    #[test]
+    fn banner_counts_only_alerted_feed_errors() {
+        // 1回目の 502 は feed_errors には入るが、帯（feed_error_count）には数えない
+        let report = RefreshReport {
+            feed_errors: vec![(1, "HTTP 502".into()), (2, "HTTP 404".into())],
+            feed_alerts: vec![(2, "HTTP 404".into())],
+            summary_error: Some("要約できませんでした".into()),
+            ..Default::default()
+        };
+        let mut status = AppStatus::default();
+        apply_report(&mut status, &report, at(8, 0));
+        assert_eq!(status.feed_error_count, 1);
+        assert_eq!(
+            status.summary_error.as_deref(),
+            Some("要約できませんでした")
+        );
+        assert_eq!(status.last_refreshed_at, Some(at(8, 0)));
     }
 
     #[test]

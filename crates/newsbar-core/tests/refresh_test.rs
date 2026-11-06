@@ -748,3 +748,149 @@ async fn no_summarizer_reports_missing_key() {
     );
     assert_eq!(statuses(&store)[0].1, SummaryStatus::Pending);
 }
+
+// ---- 一時的な失敗は2回続いたら知らせる・取得の履歴 ----
+
+/// 1つの情報源（URL は `feed_url`）だけを持つストア
+fn store_with_source(feed_url: &str) -> (Mutex<Store>, i64) {
+    let store = Store::open_in_memory().unwrap();
+    let source = store.add_source("A", feed_url, "AI", true).unwrap();
+    (Mutex::new(store), source.id)
+}
+
+/// どの情報源かに関係なく取れる、オフライン判定にならないための2つ目の情報源を足す
+async fn add_working_source(store: &Mutex<Store>) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(fixture("rss2.xml")))
+        .mount(&server)
+        .await;
+    store
+        .lock()
+        .unwrap()
+        .add_source("OK", &format!("{}/ok.xml", server.uri()), "AI", true)
+        .unwrap();
+    server
+}
+
+#[tokio::test]
+async fn first_server_error_is_not_alerted() {
+    let server = status_server(502).await;
+    let (store, id) = store_with_source(&format!("{}/feed", server.uri()));
+
+    let report = refresh(&store, &deps(), now()).await;
+
+    assert_eq!(report.feed_errors, vec![(id, "HTTP 502".to_string())]);
+    assert!(report.feed_alerts.is_empty());
+}
+
+#[tokio::test]
+async fn second_server_error_in_a_row_is_alerted() {
+    let server = status_server(502).await;
+    let (store, id) = store_with_source(&format!("{}/feed", server.uri()));
+
+    refresh(&store, &deps(), now()).await;
+    let report = refresh(&store, &deps(), now() + Duration::hours(1)).await;
+
+    assert_eq!(report.feed_alerts, vec![(id, "HTTP 502".to_string())]);
+}
+
+#[tokio::test]
+async fn server_error_after_success_is_not_alerted() {
+    let server = status_server(503).await;
+    let (store, id) = store_with_source(&format!("{}/feed", server.uri()));
+    store
+        .lock()
+        .unwrap()
+        .log_fetch(id, now() - Duration::hours(1), None, false)
+        .unwrap();
+
+    let report = refresh(&store, &deps(), now()).await;
+
+    assert!(report.feed_alerts.is_empty());
+}
+
+#[tokio::test]
+async fn rate_limit_is_treated_as_transient() {
+    let server = status_server(429).await;
+    let (store, _) = store_with_source(&format!("{}/feed", server.uri()));
+    let report = refresh(&store, &deps(), now()).await;
+    assert!(report.feed_alerts.is_empty());
+}
+
+#[tokio::test]
+async fn not_found_is_alerted_at_once() {
+    let server = status_server(404).await;
+    let (store, id) = store_with_source(&format!("{}/feed", server.uri()));
+
+    let report = refresh(&store, &deps(), now()).await;
+
+    assert_eq!(report.feed_alerts, vec![(id, "HTTP 404".to_string())]);
+}
+
+#[tokio::test]
+async fn network_error_is_alerted_only_when_repeated() {
+    let (store, id) = store_with_source(&format!("{UNREACHABLE}/feed"));
+    let _ok = add_working_source(&store).await; // 全滅（オフライン）ではない
+
+    let first = refresh(&store, &deps(), now()).await;
+    let second = refresh(&store, &deps(), now() + Duration::hours(1)).await;
+
+    assert!(first.feed_alerts.is_empty());
+    assert_eq!(second.feed_alerts.len(), 1);
+    assert_eq!(second.feed_alerts[0].0, id);
+}
+
+#[tokio::test]
+async fn fetch_results_are_logged() {
+    let bad = status_server(502).await;
+    let (store, bad_id) = store_with_source(&format!("{}/feed", bad.uri()));
+    let _ok = add_working_source(&store).await;
+
+    refresh(&store, &deps(), now()).await;
+
+    let store = store.lock().unwrap();
+    let ok_id = store
+        .list_sources()
+        .unwrap()
+        .iter()
+        .find(|s| s.name == "OK")
+        .unwrap()
+        .id;
+    let bad_log = store.recent_fetches(bad_id, 10).unwrap();
+    assert_eq!(bad_log.len(), 1);
+    assert_eq!(bad_log[0].at, now());
+    assert_eq!(bad_log[0].error.as_deref(), Some("HTTP 502"));
+    assert!(bad_log[0].transient);
+    let ok_log = store.recent_fetches(ok_id, 10).unwrap();
+    assert_eq!(ok_log.len(), 1);
+    assert_eq!(ok_log[0].error, None);
+}
+
+#[tokio::test]
+async fn not_found_is_logged_as_not_transient() {
+    let server = status_server(404).await;
+    let (store, id) = store_with_source(&format!("{}/feed", server.uri()));
+    refresh(&store, &deps(), now()).await;
+    let log = store.lock().unwrap().recent_fetches(id, 10).unwrap();
+    assert!(!log[0].transient);
+}
+
+#[tokio::test]
+async fn offline_refresh_is_not_logged_or_alerted() {
+    let (store, id) = store_with_source(&format!("{UNREACHABLE}/feed"));
+
+    let first = refresh(&store, &deps(), now()).await;
+    let second = refresh(&store, &deps(), now() + Duration::minutes(1)).await;
+
+    assert!(first.offline && second.offline);
+    assert!(second.feed_alerts.is_empty());
+    assert!(
+        store
+            .lock()
+            .unwrap()
+            .recent_fetches(id, 10)
+            .unwrap()
+            .is_empty()
+    );
+}

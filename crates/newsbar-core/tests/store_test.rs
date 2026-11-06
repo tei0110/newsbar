@@ -341,3 +341,110 @@ fn open_creates_file_and_reopens() {
     let s = Store::open(&path).unwrap();
     assert_eq!(s.list_sources().unwrap().len(), 1);
 }
+
+// ---- 取得の履歴（fetch_log） ----
+
+#[test]
+fn fetch_log_keeps_success_and_failure_newest_first() {
+    let s = store();
+    let a = s
+        .add_source("A", "https://a.example/feed", "AI", true)
+        .unwrap();
+    s.log_fetch(a.id, t(25, 10), None, false).unwrap();
+    s.log_fetch(a.id, t(25, 11), Some("HTTP 502"), true)
+        .unwrap();
+
+    let log = s.recent_fetches(a.id, 10).unwrap();
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[0].at, t(25, 11));
+    assert_eq!(log[0].error.as_deref(), Some("HTTP 502"));
+    assert!(log[0].transient);
+    assert_eq!(log[1].at, t(25, 10));
+    assert_eq!(log[1].error, None);
+}
+
+#[test]
+fn recent_fetches_is_per_source_and_limited() {
+    let s = store();
+    let a = s
+        .add_source("A", "https://a.example/feed", "AI", true)
+        .unwrap();
+    let b = s
+        .add_source("B", "https://b.example/feed", "AI", true)
+        .unwrap();
+    for hour in 1..=3 {
+        s.log_fetch(a.id, t(25, hour), None, false).unwrap();
+    }
+    s.log_fetch(b.id, t(25, 4), Some("HTTP 404"), false)
+        .unwrap();
+
+    let log = s.recent_fetches(a.id, 2).unwrap();
+    assert_eq!(
+        log.iter().map(|e| e.at).collect::<Vec<_>>(),
+        vec![t(25, 3), t(25, 2)]
+    );
+}
+
+#[test]
+fn fetch_stats_counts_since_and_last_failure() {
+    let s = store();
+    let a = s
+        .add_source("A", "https://a.example/feed", "AI", true)
+        .unwrap();
+    s.log_fetch(a.id, t(20, 9), Some("HTTP 500"), true).unwrap(); // 集計期間より前
+    s.log_fetch(a.id, t(25, 9), Some("HTTP 502"), true).unwrap();
+    s.log_fetch(a.id, t(25, 10), None, false).unwrap();
+    s.log_fetch(a.id, t(25, 11), Some("HTTP 503"), true)
+        .unwrap();
+    s.log_fetch(a.id, t(25, 12), None, false).unwrap();
+
+    let stats = s.fetch_stats(a.id, t(24, 0)).unwrap();
+    assert_eq!(stats.total, 4);
+    assert_eq!(stats.failures, 2);
+    assert_eq!(stats.last_failure_at, Some(t(25, 11)));
+    assert_eq!(stats.last_failure_error.as_deref(), Some("HTTP 503"));
+}
+
+#[test]
+fn fetch_stats_without_log_is_empty() {
+    let s = store();
+    let a = s
+        .add_source("A", "https://a.example/feed", "AI", true)
+        .unwrap();
+    let stats = s.fetch_stats(a.id, t(24, 0)).unwrap();
+    assert_eq!(
+        (stats.total, stats.failures, stats.last_failure_at),
+        (0, 0, None)
+    );
+}
+
+#[test]
+fn purge_removes_old_fetch_log() {
+    let s = store();
+    let a = s
+        .add_source("A", "https://a.example/feed", "AI", true)
+        .unwrap();
+    let now = t(31, 0);
+    s.log_fetch(a.id, now - Duration::days(31), None, false)
+        .unwrap();
+    s.log_fetch(a.id, now - Duration::days(1), None, false)
+        .unwrap();
+    s.purge(now).unwrap();
+    assert_eq!(s.recent_fetches(a.id, 10).unwrap().len(), 1);
+}
+
+#[test]
+fn deleting_source_removes_its_fetch_log() {
+    let s = store();
+    let a = s
+        .add_source("A", "https://a.example/feed", "AI", true)
+        .unwrap();
+    s.log_fetch(a.id, t(25, 10), None, false).unwrap();
+    s.delete_source(a.id).unwrap();
+    let b = s
+        .add_source("B", "https://b.example/feed", "AI", true)
+        .unwrap();
+    // id が使い回されても、前の情報源の履歴が混ざらない
+    assert!(s.recent_fetches(a.id, 10).unwrap().is_empty());
+    assert!(s.recent_fetches(b.id, 10).unwrap().is_empty());
+}

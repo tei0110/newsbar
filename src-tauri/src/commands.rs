@@ -1,7 +1,7 @@
 //! 画面（TypeScript）から呼ぶコマンド。エラーはすべて日本語の文字列で返す。
 
 use chrono::Utc;
-use newsbar_core::model::{Article, Source, UnreadCounts};
+use newsbar_core::model::{Article, FetchStats, Source, UnreadCounts};
 use newsbar_core::presets::RECOMMENDED_SOURCES;
 use newsbar_core::refresh::{RefreshReport, validate_feed_url};
 use newsbar_core::store::Store;
@@ -137,6 +137,39 @@ pub fn get_status(state: State<'_, AppState>) -> Result<AppStatus, String> {
 #[tauri::command]
 pub fn list_sources(state: State<'_, AppState>) -> Result<Vec<Source>, String> {
     with_store(&state, |s| s.list_sources())
+}
+
+/// 設定画面に出す、取得の履歴の集計を見る期間
+const FETCH_STATS_DAYS: i64 = 7;
+
+/// 情報源ごとの取得の集計（直近 `FETCH_STATS_DAYS` 日）
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SourceFetchStats {
+    pub source_id: i64,
+    #[serde(flatten)]
+    pub stats: FetchStats,
+}
+
+fn fetch_stats_since_week(
+    store: &Store,
+    now: chrono::DateTime<Utc>,
+) -> Result<Vec<SourceFetchStats>, newsbar_core::store::StoreError> {
+    let since = now - chrono::Duration::days(FETCH_STATS_DAYS);
+    store
+        .list_sources()?
+        .into_iter()
+        .map(|source| {
+            Ok(SourceFetchStats {
+                source_id: source.id,
+                stats: store.fetch_stats(source.id, since)?,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn fetch_stats(state: State<'_, AppState>) -> Result<Vec<SourceFetchStats>, String> {
+    with_store(&state, |s| fetch_stats_since_week(s, Utc::now()))
 }
 
 #[tauri::command]
@@ -280,6 +313,40 @@ mod tests {
         assert!(list[0].added);
         assert_eq!(list[0].name, RECOMMENDED_SOURCES[0].name);
         assert!(list[1..].iter().all(|r| !r.added));
+    }
+
+    #[test]
+    fn fetch_stats_cover_each_source_for_last_7_days() {
+        use chrono::{Duration, TimeZone};
+        let now = Utc.with_ymd_and_hms(2026, 11, 6, 2, 0, 0).unwrap();
+        let store = Store::open_in_memory().unwrap();
+        let a = store
+            .add_source("A", "https://a.example/feed", "AI", true)
+            .unwrap();
+        let b = store
+            .add_source("B", "https://b.example/feed", "AI", true)
+            .unwrap();
+        store
+            .log_fetch(a.id, now - Duration::days(8), Some("HTTP 500"), true)
+            .unwrap();
+        store
+            .log_fetch(a.id, now - Duration::hours(2), None, false)
+            .unwrap();
+        store
+            .log_fetch(a.id, now - Duration::hours(1), Some("HTTP 502"), true)
+            .unwrap();
+
+        let stats = fetch_stats_since_week(&store, now).unwrap();
+
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0].source_id, a.id);
+        assert_eq!((stats[0].stats.total, stats[0].stats.failures), (2, 1));
+        assert_eq!(
+            stats[0].stats.last_failure_error.as_deref(),
+            Some("HTTP 502")
+        );
+        assert_eq!(stats[1].source_id, b.id);
+        assert_eq!(stats[1].stats.total, 0);
     }
 
     #[test]

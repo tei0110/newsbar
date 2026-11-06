@@ -1,6 +1,7 @@
 // 設定画面: 情報源の管理・おすすめ・自動更新の間隔。判断は Rust 側にあり、ここは表示と操作の受け渡しだけ。
 import { listen } from "@tauri-apps/api/event";
 import {
+  type FetchStats,
   type Recommended,
   type Settings,
   type Source,
@@ -8,6 +9,7 @@ import {
   addSource,
   deleteSource,
   el,
+  fetchStats,
   getAutostart,
   getSettings,
   hasApiKey,
@@ -22,16 +24,16 @@ import {
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 async function renderSources() {
-  const sources = await listSources();
+  const [sources, stats] = await Promise.all([listSources(), fetchStats()]);
   const box = $("sources");
   if (sources.length === 0) {
     box.replaceChildren(el("div", { class: "row muted", text: "情報源がありません" }));
     return;
   }
-  box.replaceChildren(...sources.map(sourceRow));
+  box.replaceChildren(...sources.map((s) => sourceRow(s, stats.find((x) => x.source_id === s.id))));
 }
 
-function sourceRow(s: Source): HTMLElement {
+function sourceRow(s: Source, stats: FetchStats | undefined): HTMLElement {
   const toggle = document.createElement("input");
   toggle.type = "checkbox";
   toggle.checked = s.enabled;
@@ -61,10 +63,30 @@ function sourceRow(s: Source): HTMLElement {
       el("div", { class: "name", text: s.name }),
       el("div", { class: "url", text: s.feed_url, title: s.feed_url }),
       fetched,
+      historyLine(stats),
     ]),
     el("span", { class: "badge", text: s.label }),
     remove,
   ]);
+}
+
+/** 直近7日の取得の結果。例: 「直近7日: 失敗 3回／120回（最後の失敗 11/06 10:30 HTTP 502）」 */
+function historyLine(stats: FetchStats | undefined): HTMLElement | null {
+  if (!stats || stats.total === 0) return null;
+  if (stats.failures === 0) {
+    return el("div", { class: "url", text: `直近7日: ${stats.total}回すべて取得できました` });
+  }
+  let last = "";
+  if (stats.last_failure_at) {
+    const at = new Date(stats.last_failure_at).toLocaleString("ja-JP", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    last = `（最後の失敗 ${at} ${stats.last_failure_error ?? ""}）`;
+  }
+  return el("div", { class: "url", text: `直近7日: 失敗 ${stats.failures}回／${stats.total}回${last}` });
 }
 
 async function renderRecommended() {

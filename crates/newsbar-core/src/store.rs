@@ -18,6 +18,10 @@
 //!   ON DELETE CASCADE, item_key TEXT NOT NULL, seen_at TEXT NOT NULL,
 //!   PRIMARY KEY (source_id, item_key));
 //! CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+//! CREATE TABLE IF NOT EXISTS fetch_log (id INTEGER PRIMARY KEY,
+//!   source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+//!   at TEXT NOT NULL, error TEXT, transient INTEGER NOT NULL DEFAULT 0);
+//! CREATE INDEX IF NOT EXISTS fetch_log_source_at ON fetch_log(source_id, at DESC);
 //! ```
 //!
 //! 接続を開くたびに `PRAGMA foreign_keys = ON;` と `PRAGMA journal_mode = WAL;` も実行する
@@ -37,7 +41,9 @@ use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 
-use crate::model::{Article, NewArticle, Source, Summary, SummaryStatus, UnreadCounts};
+use crate::model::{
+    Article, FetchLogEntry, FetchStats, NewArticle, Source, Summary, SummaryStatus, UnreadCounts,
+};
 
 /// 保存処理のエラー
 #[derive(Debug, thiserror::Error)]
@@ -69,6 +75,10 @@ const SCHEMA: &str = "
       ON DELETE CASCADE, item_key TEXT NOT NULL, seen_at TEXT NOT NULL,
       PRIMARY KEY (source_id, item_key));
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS fetch_log (id INTEGER PRIMARY KEY,
+      source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      at TEXT NOT NULL, error TEXT, transient INTEGER NOT NULL DEFAULT 0);
+    CREATE INDEX IF NOT EXISTS fetch_log_source_at ON fetch_log(source_id, at DESC);
 ";
 
 const SOURCES_COLUMNS: &str = "id, name, feed_url, label, enabled, last_fetched_at, last_error";
@@ -194,6 +204,76 @@ impl Store {
             rusqlite::params![at, error, id],
         )?;
         Ok(())
+    }
+
+    /// 取得の履歴に1行足す。成功なら `error` は `None`。
+    pub fn log_fetch(
+        &self,
+        source_id: i64,
+        at: DateTime<Utc>,
+        error: Option<&str>,
+        transient: bool,
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO fetch_log (source_id, at, error, transient) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![source_id, at, error, transient],
+        )?;
+        Ok(())
+    }
+
+    /// 情報源の取得の履歴を、新しい順に `limit` 件まで返す。
+    pub fn recent_fetches(
+        &self,
+        source_id: i64,
+        limit: usize,
+    ) -> Result<Vec<FetchLogEntry>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT at, error, transient FROM fetch_log WHERE source_id = ?1
+             ORDER BY at DESC, id DESC LIMIT ?2",
+        )?;
+        let entries = stmt
+            .query_map(rusqlite::params![source_id, limit as i64], |row| {
+                Ok(FetchLogEntry {
+                    at: row.get(0)?,
+                    error: row.get(1)?,
+                    transient: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// `since` 以降の取得の回数・失敗の回数と、最後の失敗を返す。
+    pub fn fetch_stats(
+        &self,
+        source_id: i64,
+        since: DateTime<Utc>,
+    ) -> Result<FetchStats, StoreError> {
+        let (total, failures): (i64, i64) = self.conn.query_row(
+            "SELECT COUNT(*), COUNT(error) FROM fetch_log WHERE source_id = ?1 AND at >= ?2",
+            rusqlite::params![source_id, since],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let last_failure: Option<(DateTime<Utc>, String)> = self
+            .conn
+            .query_row(
+                "SELECT at, error FROM fetch_log
+                 WHERE source_id = ?1 AND at >= ?2 AND error IS NOT NULL
+                 ORDER BY at DESC, id DESC LIMIT 1",
+                rusqlite::params![source_id, since],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let (last_failure_at, last_failure_error) = match last_failure {
+            Some((at, error)) => (Some(at), Some(error)),
+            None => (None, None),
+        };
+        Ok(FetchStats {
+            total: total as usize,
+            failures: failures as usize,
+            last_failure_at,
+            last_failure_error,
+        })
     }
 
     pub fn is_seen(&self, source_id: i64, key: &str) -> Result<bool, StoreError> {
@@ -340,7 +420,8 @@ impl Store {
         Ok(())
     }
 
-    /// fetched_at が 30日より前の記事と、seen_at が 90日より前の取り込み済みIDを消す。
+    /// fetched_at が 30日より前の記事、seen_at が 90日より前の取り込み済みID、
+    /// 30日より前の取得の履歴を消す。
     pub fn purge(&self, now: DateTime<Utc>) -> Result<(), StoreError> {
         let article_cutoff = now - chrono::Duration::days(crate::RETENTION_DAYS);
         let seen_cutoff = now - chrono::Duration::days(crate::SEEN_RETENTION_DAYS);
@@ -351,6 +432,10 @@ impl Store {
         self.conn.execute(
             "DELETE FROM seen_items WHERE seen_at < ?1",
             rusqlite::params![seen_cutoff],
+        )?;
+        self.conn.execute(
+            "DELETE FROM fetch_log WHERE at < ?1",
+            rusqlite::params![article_cutoff],
         )?;
         Ok(())
     }
