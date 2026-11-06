@@ -1,5 +1,6 @@
 // 小窓と「広げて読む」画面で共通の表示部品。判断は Rust 側にあり、ここは見せ方だけ。
-import { type AppStatus, type Article, type UnreadCounts, el } from "./api";
+import { listen } from "@tauri-apps/api/event";
+import { type AppStatus, type Article, type Settings, type UnreadCounts, el, getSettings } from "./api";
 
 /** 一覧に出すタイトル。空文字の要約タイトル（過去に保存されたもの）も、元のタイトルで代わりに出す */
 export function displayTitle(a: Article): string {
@@ -58,4 +59,15 @@ export function oneLine(a: Article): HTMLElement | null {
 export function detailText(a: Article): string {
   if (a.detail) return a.detail;
   return a.summary_status === "pending" ? "要約待ち" : "要約できませんでした";
+}
+
+/**
+ * 文字の大きさを設定に合わせる。開いたときと、設定を保存したとき（"settings-updated"）に反映する。
+ * `pick` で小窓用・「広げて読む」画面用のどちらの値を使うかを選ぶ
+ */
+export function followFontScale(pick: (s: Settings) => number) {
+  const apply = (s: Settings) =>
+    document.documentElement.style.setProperty("--font-scale", String(pick(s) / 100));
+  void getSettings().then(apply).catch(() => undefined);
+  void listen<Settings>("settings-updated", (e) => apply(e.payload));
 }

@@ -6,7 +6,7 @@ use newsbar_core::presets::RECOMMENDED_SOURCES;
 use newsbar_core::refresh::{RefreshReport, validate_feed_url};
 use newsbar_core::store::Store;
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::display::age_label;
@@ -238,8 +238,15 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<SettingsDto, String> {
     Ok(load_settings(&store))
 }
 
+/// 設定を保存したときに画面へ送る通知（中身は保存した設定）。文字の大きさをすぐ反映するため
+pub const SETTINGS_UPDATED: &str = "settings-updated";
+
 #[tauri::command]
-pub fn save_settings(state: State<'_, AppState>, settings: SettingsDto) -> Result<(), String> {
+pub fn save_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: SettingsDto,
+) -> Result<(), String> {
     {
         let store = state
             .store
@@ -249,6 +256,7 @@ pub fn save_settings(state: State<'_, AppState>, settings: SettingsDto) -> Resul
     }
     // 新しい間隔で待ち直す
     state.wake.notify_one();
+    let _ = app.emit(SETTINGS_UPDATED, &settings);
     Ok(())
 }
 

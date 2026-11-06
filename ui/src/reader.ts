@@ -13,7 +13,7 @@ import {
   refreshNow,
   unreadCounts,
 } from "./api";
-import { detailText, displayTitle, oneLine, renderBanners, renderTabs, updatedLabel } from "./view";
+import { detailText, displayTitle, followFontScale, oneLine, renderBanners, renderTabs, updatedLabel } from "./view";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -147,3 +147,4 @@ $<HTMLInputElement>("include-read").addEventListener("change", (e) => {
 
 void listen("articles-updated", () => void render());
 void render();
+followFontScale((s) => s.reader_font_scale);

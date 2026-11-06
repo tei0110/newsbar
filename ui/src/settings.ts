@@ -148,6 +148,8 @@ function currentSettings(): Settings {
     refresh_interval_minutes: Number($<HTMLSelectElement>("interval").value),
     model: $<HTMLInputElement>("model").value,
     language: $<HTMLSelectElement>("language").value as Settings["language"],
+    popover_font_scale: Number($<HTMLSelectElement>("popover-font-scale").value),
+    reader_font_scale: Number($<HTMLSelectElement>("reader-font-scale").value),
   };
 }
 
@@ -165,6 +167,8 @@ async function save() {
 $("interval").addEventListener("change", () => void save());
 $("language").addEventListener("change", () => void save());
 $("model").addEventListener("change", () => void save());
+$("popover-font-scale").addEventListener("change", () => void save());
+$("reader-font-scale").addEventListener("change", () => void save());
 
 async function renderKeyStatus() {
   $("key-status").textContent = (await hasApiKey()) ? "保存済み（キーチェーン）" : "未設定";
@@ -207,6 +211,8 @@ async function init() {
   $<HTMLSelectElement>("interval").value = String(settings.refresh_interval_minutes);
   $<HTMLInputElement>("model").value = settings.model;
   $<HTMLSelectElement>("language").value = settings.language;
+  $<HTMLSelectElement>("popover-font-scale").value = String(settings.popover_font_scale);
+  $<HTMLSelectElement>("reader-font-scale").value = String(settings.reader_font_scale);
   await Promise.all([renderSources(), renderRecommended(), renderKeyStatus(), renderAutostart()]);
 }
 

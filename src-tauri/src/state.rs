@@ -18,6 +18,12 @@ const KEY_INTERVAL: &str = "refresh_interval_minutes";
 const KEY_MODEL: &str = "model";
 const KEY_LANGUAGE: &str = "language";
 
+/// 文字の大きさとして選べる値（標準に対する %）。小・標準・大・特大
+pub const FONT_SCALE_CHOICES: [u32; 4] = [90, 100, 115, 130];
+pub const DEFAULT_FONT_SCALE: u32 = 100;
+const KEY_POPOVER_FONT_SCALE: &str = "popover_font_scale";
+const KEY_READER_FONT_SCALE: &str = "reader_font_scale";
+
 pub struct AppState {
     pub store: Mutex<Store>,
     pub http: reqwest::Client,
@@ -44,6 +50,10 @@ pub struct SettingsDto {
     pub refresh_interval_minutes: u32,
     pub model: String,
     pub language: String,
+    /// 小窓の文字の大きさ（%）
+    pub popover_font_scale: u32,
+    /// 「広げて読む」画面の文字の大きさ（%）
+    pub reader_font_scale: u32,
 }
 
 /// 要約の言語として選べる値
@@ -63,10 +73,18 @@ pub fn load_settings(store: &Store) -> SettingsDto {
     let language = get(KEY_LANGUAGE)
         .filter(|l| LANGUAGE_CHOICES.contains(&l.as_str()))
         .unwrap_or_else(|| DEFAULT_LANGUAGE.to_string());
+    let font_scale = |key: &str| {
+        get(key)
+            .and_then(|v| v.parse::<u32>().ok())
+            .filter(|v| FONT_SCALE_CHOICES.contains(v))
+            .unwrap_or(DEFAULT_FONT_SCALE)
+    };
     SettingsDto {
         refresh_interval_minutes: interval,
         model,
         language,
+        popover_font_scale: font_scale(KEY_POPOVER_FONT_SCALE),
+        reader_font_scale: font_scale(KEY_READER_FONT_SCALE),
     }
 }
 
@@ -82,6 +100,12 @@ pub fn save_settings(store: &Store, settings: &SettingsDto) -> Result<(), String
     if !LANGUAGE_CHOICES.contains(&settings.language.as_str()) {
         return Err("要約の言語は 日本語・English から選んでください".to_string());
     }
+    if ![settings.popover_font_scale, settings.reader_font_scale]
+        .iter()
+        .all(|v| FONT_SCALE_CHOICES.contains(v))
+    {
+        return Err("文字の大きさは 小・標準・大・特大 から選んでください".to_string());
+    }
     let save = |key: &str, value: &str| {
         store
             .set_setting(key, value)
@@ -89,7 +113,15 @@ pub fn save_settings(store: &Store, settings: &SettingsDto) -> Result<(), String
     };
     save(KEY_INTERVAL, &settings.refresh_interval_minutes.to_string())?;
     save(KEY_MODEL, model)?;
-    save(KEY_LANGUAGE, &settings.language)
+    save(KEY_LANGUAGE, &settings.language)?;
+    save(
+        KEY_POPOVER_FONT_SCALE,
+        &settings.popover_font_scale.to_string(),
+    )?;
+    save(
+        KEY_READER_FONT_SCALE,
+        &settings.reader_font_scale.to_string(),
+    )
 }
 
 const KEY_READER_GEOMETRY: &str = "reader_geometry";
@@ -197,7 +229,51 @@ mod tests {
             refresh_interval_minutes: interval,
             model: model.to_string(),
             language: language.to_string(),
+            popover_font_scale: 100,
+            reader_font_scale: 100,
         }
+    }
+
+    #[test]
+    fn font_scales_are_saved_separately() {
+        let store = Store::open_in_memory().unwrap();
+        let s = SettingsDto {
+            popover_font_scale: 90,
+            reader_font_scale: 130,
+            ..settings(60, "claude-haiku-5-5", "ja")
+        };
+        save_settings(&store, &s).unwrap();
+        let loaded = load_settings(&store);
+        assert_eq!(loaded.popover_font_scale, 90);
+        assert_eq!(loaded.reader_font_scale, 130);
+    }
+
+    #[test]
+    fn unknown_font_scale_is_rejected() {
+        let store = Store::open_in_memory().unwrap();
+        let s = SettingsDto {
+            reader_font_scale: 500,
+            ..settings(180, "claude-haiku-5-5", "ja")
+        };
+        assert_eq!(
+            save_settings(&store, &s).unwrap_err(),
+            "文字の大きさは 小・標準・大・特大 から選んでください"
+        );
+        // どれも保存しない
+        assert_eq!(
+            load_settings(&store),
+            settings(60, "claude-haiku-5-5", "ja")
+        );
+    }
+
+    #[test]
+    fn broken_font_scale_falls_back_to_standard() {
+        let store = Store::open_in_memory().unwrap();
+        store.set_setting(KEY_POPOVER_FONT_SCALE, "abc").unwrap();
+        store.set_setting(KEY_READER_FONT_SCALE, "999").unwrap();
+        let loaded = load_settings(&store);
+        assert_eq!(loaded.popover_font_scale, 100);
+        assert_eq!(loaded.reader_font_scale, 100);
     }
 
     #[test]

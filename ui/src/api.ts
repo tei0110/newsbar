@@ -62,6 +62,10 @@ export interface Settings {
   refresh_interval_minutes: number;
   model: string;
   language: "ja" | "en";
+  /** 小窓の文字の大きさ（%） */
+  popover_font_scale: number;
+  /** 「広げて読む」画面の文字の大きさ（%） */
+  reader_font_scale: number;
 }
 
 export interface RefreshReport {
