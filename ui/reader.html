@@ -21,6 +21,11 @@
     <div id="banners"></div>
     <div class="reader-body">
       <section class="reader-list-pane">
+        <div class="search-bar">
+          <input id="search" type="text" placeholder="キーワードで絞り込む" autocomplete="off" spellcheck="false" />
+          <button id="search-clear" type="button" title="検索をやめる（Esc）" hidden>×</button>
+        </div>
+        <div id="search-status" class="search-status" hidden></div>
         <nav id="tabs" class="tabs"></nav>
         <main id="list" class="list"></main>
         <footer class="pop-footer">

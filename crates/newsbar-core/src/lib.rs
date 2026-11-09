@@ -8,6 +8,7 @@ pub mod ingest;
 pub mod model;
 pub mod presets;
 pub mod refresh;
+pub mod search;
 pub mod store;
 pub mod summarize;
 pub mod url_norm;

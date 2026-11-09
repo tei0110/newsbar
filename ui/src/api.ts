@@ -75,8 +75,9 @@ export interface RefreshReport {
   summary_error: string | null;
 }
 
-export const listArticles = (label: string | null, includeRead: boolean) =>
-  invoke<Article[]>("list_articles", { label, includeRead });
+/** 記事の一覧。`query` は検索語（空白で区切るとすべてを含む記事だけ。空ならすべて） */
+export const listArticles = (label: string | null, includeRead: boolean, query = "") =>
+  invoke<Article[]>("list_articles", { label, includeRead, query });
 export const unreadCounts = () => invoke<UnreadCounts>("unread_counts");
 export const markRead = (id: number) => invoke<void>("mark_read", { id });
 export const markAllRead = (label: string | null) => invoke<number>("mark_all_read", { label });

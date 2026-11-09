@@ -4,6 +4,7 @@ use chrono::Utc;
 use newsbar_core::model::{Article, FetchStats, Source, UnreadCounts};
 use newsbar_core::presets::RECOMMENDED_SOURCES;
 use newsbar_core::refresh::{RefreshReport, validate_feed_url};
+use newsbar_core::search::matches;
 use newsbar_core::store::Store;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -73,11 +74,14 @@ pub fn list_articles(
     state: State<'_, AppState>,
     label: Option<String>,
     include_read: bool,
+    query: Option<String>,
 ) -> Result<Vec<ArticleDto>, String> {
     let now = Utc::now();
     let articles = with_store(&state, |s| s.list_articles(label.as_deref(), include_read))?;
+    let query = query.unwrap_or_default();
     Ok(articles
         .into_iter()
+        .filter(|article| matches(article, &query))
         .map(|article| ArticleDto {
             age_label: age_label(article.published_at, now),
             article,

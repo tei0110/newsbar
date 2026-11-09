@@ -71,3 +71,49 @@ export function followFontScale(pick: (s: Settings) => number) {
   void getSettings().then(apply).catch(() => undefined);
   void listen<Settings>("settings-updated", (e) => apply(e.payload));
 }
+
+/**
+ * 検索欄（#search と ×ボタン #search-clear）を動かす。入力が落ち着いたら `onChange` に検索語を渡す。
+ * 日本語の変換中は待ち、確定してから絞り込む。Esc か × で検索をやめる
+ */
+export function setupSearch(onChange: (query: string) => void) {
+  const input = document.getElementById("search") as HTMLInputElement;
+  const clear = document.getElementById("search-clear") as HTMLButtonElement;
+  let timer: number | undefined;
+  const fire = () => {
+    window.clearTimeout(timer);
+    clear.hidden = input.value === "";
+    onChange(input.value.trim());
+  };
+  const reset = () => {
+    input.value = "";
+    fire();
+  };
+  input.addEventListener("input", (e) => {
+    if ((e as InputEvent).isComposing) return;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(fire, 250);
+  });
+  input.addEventListener("compositionend", fire);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !e.isComposing) {
+      e.preventDefault();
+      reset();
+    }
+  });
+  clear.addEventListener("click", () => {
+    reset();
+    input.focus();
+  });
+}
+
+/** 絞り込み中であることと件数（例: 「"CVE" で絞り込み中 3件」）。検索していなければ隠す */
+export function renderSearchStatus(box: HTMLElement, query: string, count: number) {
+  box.hidden = query === "";
+  box.textContent = query === "" ? "" : `"${query}" で絞り込み中 ${count}件`;
+}
+
+/** 一覧が空のときの文言 */
+export function emptyListText(query: string): string {
+  return query === "" ? "新着はありません" : "見つかりませんでした";
+}

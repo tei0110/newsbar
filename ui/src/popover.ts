@@ -15,19 +15,32 @@ import {
   refreshNow,
   unreadCounts,
 } from "./api";
-import { detailText, displayTitle, followFontScale, oneLine, renderBanners, renderTabs, updatedLabel } from "./view";
+import {
+  detailText,
+  displayTitle,
+  emptyListText,
+  followFontScale,
+  oneLine,
+  renderBanners,
+  renderSearchStatus,
+  renderTabs,
+  setupSearch,
+  updatedLabel,
+} from "./view";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 let currentLabel: string | null = null;
 let includeRead = false;
+/** 検索語（小窓を閉じても残す。記事を開いて戻ってきたときに絞り込みが消えないように） */
+let query = "";
 let expandedId: number | null = null;
 /** この小窓を開いている間に既読にした記事（閉じるまでは ○ で残す） */
 const readThisSession = new Set<number>();
 
 async function render() {
   const [articles, counts, status] = await Promise.all([
-    listArticles(currentLabel, true),
+    listArticles(currentLabel, true, query),
     unreadCounts(),
     getStatus(),
   ]);
@@ -38,7 +51,9 @@ async function render() {
     expandedId = null;
     void render();
   });
-  renderList(articles.filter((a) => includeRead || !a.read_at || readThisSession.has(a.id)));
+  const visible = articles.filter((a) => includeRead || !a.read_at || readThisSession.has(a.id));
+  renderSearchStatus($("search-status"), query, visible.length);
+  renderList(visible);
 }
 
 function renderHeader(counts: UnreadCounts, status: AppStatus) {
@@ -50,7 +65,7 @@ function renderHeader(counts: UnreadCounts, status: AppStatus) {
 function renderList(articles: Article[]) {
   const list = $("list");
   if (articles.length === 0) {
-    list.replaceChildren(el("p", { class: "empty", text: "新着はありません" }));
+    list.replaceChildren(el("p", { class: "empty", text: emptyListText(query) }));
     return;
   }
   list.replaceChildren(...articles.map(renderItem));
@@ -114,5 +129,10 @@ void listen("popover-shown", () => {
   void render();
 });
 void listen("articles-updated", () => void render());
+setupSearch((q) => {
+  query = q;
+  expandedId = null;
+  void render();
+});
 void render();
 followFontScale((s) => s.popover_font_scale);

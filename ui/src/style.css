@@ -101,6 +101,26 @@ body.popover {
   font-size: 12px;
 }
 
+.search-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.search-bar input {
+  flex: 1;
+}
+
+.search-bar button {
+  padding: 3px 8px;
+}
+
+.search-status {
+  padding: 4px 12px 0;
+  font-size: 11px;
+  color: var(--accent);
+}
+
 .tabs {
   display: flex;
   gap: 6px;
