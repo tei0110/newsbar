@@ -3,6 +3,7 @@
 mod autostart;
 mod commands;
 mod display;
+mod power;
 mod scheduler;
 mod secrets;
 mod state;
@@ -62,8 +63,10 @@ pub fn run() {
                 status: Mutex::new(AppStatus::default()),
                 wake: tokio::sync::Notify::new(),
                 refreshing: AtomicBool::new(false),
+                sleep: scheduler::SystemSleep::default(),
                 api_key: secrets::KeyCache::new(),
             });
+            power::watch_system_sleep(app.handle());
 
             tray::setup(app.handle())?;
 

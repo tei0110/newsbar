@@ -1,7 +1,7 @@
 //! 自動更新。起動直後に1回、その後は設定の間隔ごと（または設定変更などで起こされたとき）に更新する。
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -28,7 +28,11 @@ pub fn spawn(app: AppHandle) {
             loop {
                 tokio::select! {
                     _ = tokio::time::sleep(CHECK_INTERVAL) => {
-                        if should_auto_refresh(refresh_is_due(&app), display_asleep()) {
+                        if should_auto_refresh(
+                            refresh_is_due(&app),
+                            display_asleep(),
+                            state.sleep.is_asleep(),
+                        ) {
                             break;
                         }
                     }
@@ -54,10 +58,33 @@ pub fn is_due(
 
 /// 自動更新（1分ごとの確認）で、今更新を始めるか。
 ///
-/// 画面がスリープしている間は始めない。Power Nap などで Mac が数秒だけ起きる間（DarkWake）にも
-/// 確認が走り、通信の途中で眠ってしまうため。画面がついたら、次の確認で更新する。
-pub fn should_auto_refresh(due: bool, display_asleep: bool) -> bool {
-    due && !display_asleep
+/// 画面がスリープしている間と、システムが眠っている間は始めない。Power Nap などで Mac が
+/// 数秒だけ起きる間（DarkWake）にも確認が走り、通信の途中で眠ってしまうため。
+/// 画面だけでは足りない: 蓋を閉じて外部ディスプレイを外すと、メインが代わりの画面になり、
+/// DarkWake の間も「スリープしていない」と答える。起きたら、次の確認で更新する。
+pub fn should_auto_refresh(due: bool, display_asleep: bool, system_asleep: bool) -> bool {
+    due && !display_asleep && !system_asleep
+}
+
+/// システムが眠っているか。macOS の「スリープに入る」通知で眠り、「完全に起きた」通知で起きる。
+///
+/// DarkWake の間は「完全に起きた」通知が来ないので、眠ったままになる（11/16〜17 の夜に、
+/// 62 回の DarkWake で一度も来ないことを確かめた）。
+#[derive(Debug, Default)]
+pub struct SystemSleep(AtomicBool);
+
+impl SystemSleep {
+    pub fn will_sleep(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    pub fn did_wake(&self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_asleep(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
 }
 
 /// 更新が終わったあとの「最終更新」の時刻。
@@ -193,9 +220,30 @@ mod tests {
 
     #[test]
     fn no_auto_refresh_while_display_is_asleep() {
-        assert!(!should_auto_refresh(true, true));
-        assert!(should_auto_refresh(true, false));
-        assert!(!should_auto_refresh(false, false));
+        assert!(!should_auto_refresh(true, true, false));
+        assert!(should_auto_refresh(true, false, false));
+        assert!(!should_auto_refresh(false, false, false));
+    }
+
+    /// 蓋を閉じて外部ディスプレイを外すと、メインが代わりの画面になり「スリープしていない」と答える。
+    /// そのときも、システムが眠っている（willSleep を受けて didWake をまだ受けていない）なら始めない
+    #[test]
+    fn no_auto_refresh_while_system_is_asleep_even_if_display_says_awake() {
+        assert!(!should_auto_refresh(true, false, true));
+    }
+
+    #[test]
+    fn system_sleep_starts_awake() {
+        assert!(!SystemSleep::default().is_asleep());
+    }
+
+    #[test]
+    fn system_sleep_is_asleep_from_will_sleep_until_did_wake() {
+        let sleep = SystemSleep::default();
+        sleep.will_sleep();
+        assert!(sleep.is_asleep());
+        sleep.did_wake();
+        assert!(!sleep.is_asleep());
     }
 
     #[test]
